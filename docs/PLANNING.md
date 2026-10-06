@@ -367,6 +367,8 @@ CI (GitHub Actions): ruff + pytest on every PR. No test may call the Databento A
 
 ## 10. Issue roadmap
 
+IDs below are roadmap IDs. GitHub issue numbers are offset by 2 (roadmap #1 is GitHub issue #3) because #1 and #2 are pull requests.
+
 Sizes: S ≤ 0.5 day, M ≈ 1–2 days, L ≈ 3+ days. Labels: `infra`, `data`, `pricing`, `vrp`, `hedging`, `analysis`, `docs`, `stretch`.
 
 | ID | Title | Depends on | Size | Acceptance criteria |
@@ -429,7 +431,7 @@ Agreements (proposed in the README PR; approve or comment there):
 | License or budget does not cover enough option history | Medium | Check first (#3); shorten sample; use settlements/daily for measurement and snapshots only for hedging |
 | Wrong or noisy strikes/quotes | Medium | Strike sanity check; cleaning log; synthetic tests |
 | Sample dominated by one volatility episode | High | Report sub-samples; state limitation; use a longer daily sample if possible |
-| Scope creep (more products, intraday hedging) | High | Out-of-scope list below; stretch issue only after #19 |
+| Scope creep (more products, intraday hedging) | High | Out-of-scope list below; no new products or extensions before #19 is done |
 | Team member bottleneck on tricky modules (#9, #12) | Medium | Pair on L-size issues; write tests first |
 | Result is null or contradicts the papers | Medium | Acceptable and reportable; no tuning until a result appears |
 
@@ -439,19 +441,16 @@ Agreements (proposed in the README PR; approve or comment there):
 
 **Out of scope:** other underlyings, VIX products, jump-adjusted hedging, intraday dynamic hedging, event contracts, any live trading.
 
-**Stretch:** CL options and the EIA release (issue #20). Started only after #19 is done (§15.7).
-
 ---
 
-## 15. Open decisions (resolve in the README PR discussion)
+## 15. Decisions (resolved in the README PR discussion)
 
 1. Which ES option series first: weekly, end-of-month, or quarterly? **Decided: end-of-month (`monthly_eom`, `EW` root), European exercise only (§4.1, §5.3).**
-2. Sample period and whether a longer daily-only sample is available. **Open. Proposed (Tanwir): keep Oct 2023 to Sep 2026 (about 739 trading days); confirm once the 5-minute data cost is checked in #3.**
+2. Sample period and whether a longer daily-only sample is available. **Decided (Tanwir, Aryaa): Oct 2023 to Sep 2026 (about 739 trading days). The 5-minute data cost is still checked before the first pull (roadmap #3, budget abort in config).**
 3. Session definition for realized variance (full Globex vs regular hours). **Decided (Tanwir): full Globex, so overnight moves around macro releases are captured without an RTH overnight adjustment. Proposed gap rule: the return across the daily maintenance halt and across weekends and holidays is kept as one return spanning the gap, not dropped (§4.2).**
 4. Snapshot time and ES settlement-time convention. **Decided (Aryaa): 15:00 CT, checked against the ES contract specs and matching Bakshi–Kapadia's last-quote-before-3:00-pm rule. Strike coverage at that minute is checked in #5 (back-fill rule, §5.2).**
 5. Return denominator for the strategy: notional, vega, or margin. **Decided: entry vega primary; assumed margin fraction secondary (§4.7).**
 6. Which VRP definition is primary: difference, log ratio, or swap return. **Decided: the difference $RV - SW$; log ratio reported alongside for inference (§4.4).**
-7. Whether the CL/EIA extension is in scope. **Decided (Alex): stretch only. Issue #20 stays open with the `stretch` label and is not started until #19 is done, per the scope-creep risk in §13.**
 
 ---
 
