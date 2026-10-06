@@ -94,7 +94,7 @@ $$RV_{t,T} = \frac{1}{\tau}\sum_{i=1}^{n} r_i^2$$
 Dividing by calendar-year $\tau$ keeps $RV$ on the same annualization basis as implied variance. Variants:
 - **Daily:** settlement-to-settlement returns. (Carr–Wu's Eq. 11 uses simple percentage returns and an annualization of 365/30 over the 30-day window; they report that log vs simple returns, demeaning, and ACT/365 vs 252 day count do not change conclusions. We use log returns in the baseline and treat simple returns as a robustness variant.)
 - **Intraday:** 5-minute returns. Higher frequency captures more information but is more exposed to microstructure noise; 5 minutes is the conventional compromise.
-- ES trades nearly around the clock. The session definition (full Globex vs regular hours) and the treatment of the daily maintenance gap must be explicit in the config **[DECISION]**.
+- ES trades nearly around the clock. Session: **full Globex** (decided, §15.3), set in the config. The return across the daily maintenance halt, weekends and holidays is kept as one return spanning the gap rather than dropped (proposed, §15.3).
 
 ### 4.3 Variance swaps and the model-free strip
 
@@ -304,7 +304,7 @@ es-vrp/
 data:
   dataset: GLBX.MDP3
   product: ES.FUT                 
-  series: monthly_eom          # DECISION: weekly | monthly_eom | quarterly
+  series: monthly_eom          # decided (§15.1): weekly | monthly_eom | quarterly
   start: 2023-10-01            # shorten if license/cost requires
   end: 2026-09-30
   snapshot_time_ct: "15:00"    # last-quote cutoff before cash close 
@@ -325,7 +325,7 @@ strip:
   min_front_days: 8            # use next two expiries if nearest is closer (Carr–Wu)
 realized:
   frequency: [daily, 5m]
-  session: full_globex         # full_globex | rth   DECISION
+  session: full_globex         # full_globex | rth   (decided, §15.3)
 hedging:
   hedge_delta: iv_daily        # iv_daily | iv_fixed | rv
   rebalance: daily
@@ -399,12 +399,15 @@ Sizes: S ≤ 0.5 day, M ≈ 1–2 days, L ≈ 3+ days. Labels: `infra`, `data`, 
 
 Roles follow the course's suggested process:
 - **Tech leader**: Tanwir Silar 
-- **Communication leader:** README PR (#2) and final README (#19).
+- **Communication leader:** Alex Nikolaev: README PR (#2) and final README (#19).
 - **Design leader(s):** Aryaa Gunavante, Andrew Yang 
 
 Rules: no secrets in commits; no raw Databento data in git; every PR runs tests; theory changes go through `docs/theory.md` review.
 
-Agree and record on GitHub: the communication channel, review turnaround expectation, and who reviews data-cost-incurring changes.
+Agreements (proposed in the README PR; approve or comment there):
+- **Communication channel:** WhatsApp for day-to-day coordination. Decisions and approvals are recorded on GitHub (PR reviews and issue comments) so contributions are visible.
+- **Review turnaround:** review a teammate's PR within 24 hours of being asked on WhatsApp.
+- **Data-cost changes:** any PR that pulls paid Databento data is reviewed by the Tech leader (Tanwir) before merge.
 
 ---
 
@@ -436,16 +439,19 @@ Agree and record on GitHub: the communication channel, review turnaround expecta
 
 **Out of scope:** other underlyings, VIX products, jump-adjusted hedging, intraday dynamic hedging, event contracts, any live trading.
 
+**Stretch:** CL options and the EIA release (issue #20). Started only after #19 is done (§15.7).
+
 ---
 
 ## 15. Open decisions (resolve in the README PR discussion)
 
-1. Which ES option series first: weekly, end-of-month, or quarterly? (Decide after inspecting definitions and exercise styles.)
-2. Sample period and whether a longer daily-only sample is available.
-3. Session definition for realized variance (full Globex vs regular hours).
-4. Snapshot time and ES settlement-time convention.
+1. Which ES option series first: weekly, end-of-month, or quarterly? **Decided: end-of-month (`monthly_eom`, `EW` root), European exercise only (§4.1, §5.3).**
+2. Sample period and whether a longer daily-only sample is available. **Open. Proposed (Tanwir): keep Oct 2023 to Sep 2026 (about 739 trading days); confirm once the 5-minute data cost is checked in #3.**
+3. Session definition for realized variance (full Globex vs regular hours). **Decided (Tanwir): full Globex, so overnight moves around macro releases are captured without an RTH overnight adjustment. Proposed gap rule: the return across the daily maintenance halt and across weekends and holidays is kept as one return spanning the gap, not dropped (§4.2).**
+4. Snapshot time and ES settlement-time convention. **Decided (Aryaa): 15:00 CT, checked against the ES contract specs and matching Bakshi–Kapadia's last-quote-before-3:00-pm rule. Strike coverage at that minute is checked in #5 (back-fill rule, §5.2).**
 5. Return denominator for the strategy: notional, vega, or margin. **Decided: entry vega primary; assumed margin fraction secondary (§4.7).**
 6. Which VRP definition is primary: difference, log ratio, or swap return. **Decided: the difference $RV - SW$; log ratio reported alongside for inference (§4.4).**
+7. Whether the CL/EIA extension is in scope. **Decided (Alex): stretch only. Issue #20 stays open with the `stretch` label and is not started until #19 is done, per the scope-creep risk in §13.**
 
 ---
 

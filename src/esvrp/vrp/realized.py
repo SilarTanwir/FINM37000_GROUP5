@@ -17,5 +17,6 @@ def realized_variance(returns: pd.Series, tau: float) -> float:
 
 def returns_from_bars(bars: pd.DataFrame, freq: Literal["5m", "1d"], session: str) -> pd.Series:
     """Log returns of the specific underlying contract."""
-    # TODO [DECISION]: session definition and maintenance gap (§4.2, §15.3).
+    # Decided (§4.2, §15.3): full Globex; returns across the maintenance halt, weekends and
+    # holidays are kept as one return spanning the gap (gap rule proposed in the README PR).
     raise NotImplementedError
