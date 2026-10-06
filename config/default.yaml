@@ -1,0 +1,42 @@
+# PLANNING.md §8. Items marked VERIFY/DECISION are unresolved; see docs/data.md.
+data:
+  dataset: GLBX.MDP3
+  product: ES                  # options parent symbol family  [VERIFY]
+  series: monthly_eom          # DECISION: weekly | monthly_eom | quarterly
+  start: 2023-10-01            # shorten if license/cost requires
+  end: 2026-09-30
+  snapshot_time_ct: "14:55"    # last-quote cutoff before cash close  [VERIFY settlement time]
+  budget_usd: 50               # abort pull if estimated cost exceeds this
+pricing:
+  rate_source: constant        # constant | fred
+  rate_constant: 0.04
+  day_count: ACT/365
+cleaning:
+  min_strikes: 10
+  min_range_pct: 0.10
+  drop_zero_bid: true
+  drop_crossed: true
+strip:
+  method: vix_discrete         # vix_discrete | iv_grid (Carr-Wu implementation)
+  price_col: mid               # mid | bid | ask
+  maturity_mode: matched       # matched | constant_30d
+  min_front_days: 8            # use next two expiries if nearest is closer (Carr-Wu)
+realized:
+  frequency: [daily, 5m]
+  session: full_globex         # full_globex | rth   DECISION
+hedging:
+  hedge_delta: iv_daily        # iv_daily | iv_fixed | rv
+  rebalance: daily
+  moneyness_max: 0.10
+  maturity_buckets_days: [14, 30, 60]
+costs:
+  option_halfspread: from_data # or fixed number of index points
+  hedge_slippage_ticks: 0.5
+  fee_per_contract_usd: 1.50
+inference:
+  hac_lags: auto               # horizon in trading days - 1; also report 30 (Carr-Wu)
+  cluster_by: entry_date
+regimes:
+  variable: sw_level           # sw_level | trailing_rv_21d
+  n_bins: 3
+  window: expanding

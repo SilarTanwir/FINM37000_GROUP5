@@ -1,0 +1,13 @@
+.env
+data/*
+!data/.gitkeep
+*.parquet
+reports/_cache
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+.doit.db*
+*.egg-info/
+.venv/
+.DS_Store
+Sources and Plan/
