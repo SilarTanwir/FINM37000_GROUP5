@@ -22,11 +22,11 @@ class ConfigError(ValueError):
 @dataclass(frozen=True)
 class DataConfig:
     dataset: str
-    product: str  # TODO [VERIFY]: options parent symbol family (§8)
-    series: str  # TODO [DECISION]: weekly | monthly_eom | quarterly (§15.1)
+    product: str
+    series: str
     start: date
     end: date
-    snapshot_time_ct: str  # TODO [VERIFY]: ES settlement time (§15.4)
+    snapshot_time_ct: str  # TODO [DECISION]: snapshot time / settlement-time convention (§15.4)
     budget_usd: float
 
 

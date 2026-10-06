@@ -16,5 +16,4 @@ def build_bars(raw: pd.DataFrame, freq: str, session: str) -> pd.DataFrame:
 
 def settlements(stats: pd.DataFrame) -> pd.Series:
     """Daily settlement prices per underlying contract."""
-    # TODO [VERIFY]: settlement stat type exists for options/futures in `statistics` (§5.2).
     raise NotImplementedError

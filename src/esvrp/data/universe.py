@@ -10,8 +10,7 @@ import pandas as pd
 
 def build_universe(definitions: pd.DataFrame) -> pd.DataFrame:
     """One row per option: strike, expiry, cp, underlying, exercise style."""
-    # TODO [VERIFY]: exercise style per series (weeklies European, quarterlies American?) (§4.1).
-    # TODO [DECISION]: which ES option series first: weekly | monthly_eom | quarterly (§15.1).
+    # Series is monthly_eom: restrict to European exercise (§4.1).
     raise NotImplementedError
 
 

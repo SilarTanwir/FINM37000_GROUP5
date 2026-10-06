@@ -27,5 +27,4 @@ def delta_hedged_gain(
     entry_price: Literal["mid", "ask", "bid"],
 ) -> HedgeResult:
     """Pi = O_T - e^{r tau} O_0 - sum_n Delta_n (F_{n+1} - F_n)."""
-    # TODO [VERIFY]: identity and financing terms in the derivation doc (§4.5).
     raise NotImplementedError

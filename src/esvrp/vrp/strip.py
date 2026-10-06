@@ -25,6 +25,5 @@ def variance_swap_rate(
     chain_slice: pd.DataFrame, F: float, r: float, tau: float, price_col: str = "mid"
 ) -> StripResult:
     """VIX-style discrete strip (baseline) with bid/mid/ask variants."""
-    # TODO [VERIFY]: exact identity/derivation in docs/theory.md before relying on it (§4.5).
     # See also strip.method iv_grid (Carr-Wu implementation) in §4.3.
     raise NotImplementedError

@@ -6,25 +6,27 @@ Raw Databento data must never be committed (`data/` and `*.parquet` are gitignor
 
 ## Open verification items
 
-Items marked **[VERIFY]** or **[DECISION]** in `docs/PLANNING.md` are deliberately unresolved. Each has a
-`TODO` comment at the point of use in the code.
+Items marked **[VERIFY]** or **[DECISION]** in `docs/PLANNING.md` that are still unresolved, plus the open
+decisions in §15. Each has a `TODO` comment at the point of use in the code.
 
 | # | Type | Item | Plan § | Where in code |
 |---|---|---|---|---|
-| 1 | VERIFY | Exact identity and financing terms for hedged gain vs gamma-weighted `RV - SW`, before relying on it in the report | 4.5 | `hedging/simulator.py`, `vrp/strip.py` |
-| 2 | VERIFY | Exercise style per ES option series (working assumption: weeklies European, quarterlies American) | 4.1 | `data/universe.py` |
-| 3 | VERIFY | Authors/venue of "Exploring the Variance Risk Premium Across Assets"; confirm the S&P 500 result | 1, 3.3, 16 | docs only |
-| 4 | VERIFY | Databento key can pull options; available history; cost for the date range | 5.1 | `data/client.py`, `config/default.yaml` |
-| 5 | VERIFY | Schema names and availability for options (`definition`, `statistics`, `bbo-1m`, `ohlcv-1m`, `mbp-1`) | 5.2 | `data/client.py` |
-| 6 | VERIFY | Settlement stat type exists for options in `statistics` | 5.2 | `data/underlying.py` |
-| 7 | VERIFY | ES settlement time and snapshot cutoff (`snapshot_time_ct: 14:55`) | 5.2, 8 | `data/quotes.py`, `config.py` |
-| 8 | VERIFY | `strike_price` display-factor issue does not affect the ES series; strikes bracket the futures price | 5.3 | `data/universe.py` |
-| 9 | VERIFY | Data licensing terms for committing/sharing raw data | 5.3 | docs only |
-| 10 | VERIFY | Options parent symbol family for ES (`data.product`) | 8 | `config.py`, `config/default.yaml` |
-| 11 | DECISION | ES option series first: weekly, end-of-month or quarterly | 15.1 | `data/universe.py`, `config.py` |
-| 12 | DECISION | Sample period; whether a longer daily-only sample exists | 15.2 | `config/default.yaml` |
-| 13 | DECISION | Session for realized variance (full Globex vs RTH) and maintenance-gap treatment | 4.2, 15.3 | `data/underlying.py`, `vrp/realized.py`, `config.py` |
-| 14 | DECISION | Snapshot time and settlement-time convention | 15.4 | `data/quotes.py` |
-| 15 | DECISION | Strategy return denominator: notional, vega or margin | 4.7, 15.5 | `analysis/strategy.py` |
-| 16 | DECISION | Primary VRP definition: difference, log ratio or swap return | 15.6 | `vrp/premium.py` |
-| 17 | DECISION | Whether the CL/EIA extension is in scope | 15.7 | issue #20 |
+| 1 | VERIFY | `strike_price` display-factor issue does not affect the ES series; strikes bracket the futures price | 5.3 | `data/universe.py` |
+| 2 | DECISION | Sample period; whether a longer daily-only sample exists | 15.2 | `config/default.yaml` |
+| 3 | DECISION | Session for realized variance (full Globex vs RTH) and maintenance-gap treatment | 4.2, 15.3 | `data/underlying.py`, `vrp/realized.py`, `config.py` |
+| 4 | DECISION | Snapshot time and ES settlement-time convention (config currently `15:00` CT) | 15.4 | `data/quotes.py`, `config.py` |
+| 5 | DECISION | Strategy return denominator: notional, vega or margin | 4.7, 15.5 | `analysis/strategy.py` |
+| 6 | DECISION | Primary VRP definition: difference, log ratio or swap return | 15.6 | `vrp/premium.py` |
+| 7 | DECISION | Whether the CL/EIA extension is in scope | 15.7 | issue #20 |
+
+## Resolved since the first draft
+
+| Item | Resolution |
+|---|---|
+| ES option series | `monthly_eom`; analysis restricted to European options (§4.1, §15.1 still lists it) |
+| Exercise style per series | Follows from the series choice above |
+| Options parent symbol (`data.product`) | `ES.FUT` |
+| Snapshot cutoff | `15:00` CT in config (convention still open, item 4) |
+| Databento access, history, cost; schema names; settlement stat type; data licensing | Verified by the team; the `[VERIFY]` tags were removed from the plan |
+| Hedged-gain identity and financing terms | Tag removed from the plan; the identity is documented as the standard Black-Scholes result, distinct from Bakshi-Kapadia's vega-weighted link (§4.5) |
+| "Exploring the Variance Risk Premium Across Assets" | Heston and Todorov (2023), in `docs/references/` |

@@ -1,11 +1,11 @@
-# PLANNING.md §8. Items marked VERIFY/DECISION are unresolved; see docs/data.md.
+# PLANNING.md §8. Items marked DECISION are unresolved; see docs/data.md.
 data:
   dataset: GLBX.MDP3
-  product: ES                  # options parent symbol family  [VERIFY]
-  series: monthly_eom          # DECISION: weekly | monthly_eom | quarterly
+  product: ES.FUT
+  series: monthly_eom          # weekly | monthly_eom | quarterly (European exercise only)
   start: 2023-10-01            # shorten if license/cost requires
   end: 2026-09-30
-  snapshot_time_ct: "14:55"    # last-quote cutoff before cash close  [VERIFY settlement time]
+  snapshot_time_ct: "15:00"    # last-quote cutoff before cash close
   budget_usd: 50               # abort pull if estimated cost exceeds this
 pricing:
   rate_source: constant        # constant | fred

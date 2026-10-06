@@ -10,7 +10,7 @@ import pandas as pd
 
 def load_snapshots(universe: pd.DataFrame, bbo: pd.DataFrame, snapshot_time_ct: str) -> pd.DataFrame:
     """Last bid/ask per option before the snapshot time, one row per option-day."""
-    # TODO [VERIFY]: ES settlement time; [DECISION]: snapshot time (§15.4).
+    # TODO [DECISION]: snapshot time and ES settlement-time convention (§15.4).
     raise NotImplementedError
 
 
