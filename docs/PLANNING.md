@@ -396,7 +396,7 @@ Sizes: S ≤ 0.5 day, M ≈ 1–2 days, L ≈ 3+ days. Labels: `infra`, `data`, 
 Roles follow the course's suggested process:
 - **Tech leader**: Tanwir Silah 
 - **Communication leader:** README PR (#2) and final README (#19).
-- **Design leader(s):** Aryaa Gunavante 
+- **Design leader(s):** Aryaa Gunavante, Andrew Yang 
 
 Rules: no secrets in commits; no raw Databento data in git; every PR runs tests; theory changes go through `docs/theory.md` review.
 
