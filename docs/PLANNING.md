@@ -134,6 +134,8 @@ $$SW_{t,T} = \frac{2}{\tau}e^{r\tau}\sum_i \frac{\Delta K_i}{K_i^2}\,Q(K_i) \;-\
 
 $$VRP_{t,T} = RV_{t,T} - SW_{t,T}\qquad(\text{variance units; Carr–Wu})$$
 
+**This difference is the primary VRP definition (decided, §15.6).** It is the source paper's headline measure, it is the variance-swap payoff, and it is in the same realized-minus-implied form as the hedged gains it is compared with in H3. Its weakness is that it scales with the level of volatility, so a few spikes can dominate the mean and its t-statistic in a short sample; every significance test on the difference is therefore reported alongside the log ratio.
+
 Also reported: the log variance risk premium $LRP=\ln(RV/SW)$ and the variance-swap excess return $RV/SW - 1$ for a long-variance position (Carr–Wu use the log form to make the distribution closer to normal; their Sharpe ratio for shorting variance is the mean of $-\ln(RV/SW)$ over its Newey–West standard deviation, annualized by $\sqrt{365/30}$). A negative mean means variance buyers pay a premium and variance sellers earn it. $SW_{t,T}$ is measured at $t$; $RV_{t,T}$ is realized afterwards, so the pair is only observable at $T$ (careful with look-ahead in any regime variable).
 
 ### 4.5 Delta-hedged gains and the link to the VRP
@@ -171,7 +173,8 @@ Daily-start, ~30-day-horizon observations overlap, so errors are serially correl
 
 - **Option costs:** buy at the ask, sell at the bid (half-spread each way versus mid). Parameterize by moneyness bucket from a quote-based calibration sample.
 - **Hedge costs:** ES futures slippage per rebalance, plus exchange, clearing and broker fees per contract (config parameters).
-- **Capital:** short options require margin; report returns on a stated notional and, as a secondary view, on an assumed margin fraction **[DECISION]**.
+- **Return denominator (decided, §15.5):** entry vega is primary. Trades are sized to constant entry vega and P&L is reported per unit vega; for a delta-hedged option this is approximately realized minus implied volatility in vol points, which makes results comparable across strikes and maturities and with the VRP. A delta-hedged position has no net exposure to the futures price, so notional is not a measure of the risk taken.
+- **Capital:** short options require margin; as a secondary view, report returns on an assumed margin fraction (an assumption, since actual margin is not available), which is the basis for drawdown and tail metrics. $\Pi/F_{t_0}$ and $\Pi/O_0$ (§4.5) are kept for comparability with Bakshi–Kapadia only. Entry vega goes stale as the futures price moves and understates the gamma risk of short-dated options, so read the shortest maturity bucket with that in mind.
 - **Risk metrics:** annualized Sharpe, skewness, worst day/month, max drawdown, and conditional value at risk. Short volatility has negative skew; the average gain can hide rare large losses, so the tails must be displayed, not averaged away.
 
 ### 4.8 Limitations to state up front
@@ -198,7 +201,8 @@ Databento, dataset `GLBX.MDP3` (CME Globex), which carries futures and options o
 | Cost calibration | `mbp-1` | Small sample only (spread by moneyness, hedge slippage) |
 
 ### 5.3 Known data issues to handle
-- Databento's public issue list reports that for some CME options parent symbols the `strike_price` in definitions uses the wrong display factor. **[VERIFY the ES series used is unaffected; add a sanity check that strikes bracket the futures price.]**
+- Databento's public issue list ("Incorrect display factor used for the `strike_price` field in the definition schema for some CME options") reports that for some CME options parent symbols the `strike_price` in definitions is decoded with the option's `display_factor` instead of the underlying future's, so strikes are off by a constant power of ten where the two differ. **Verified: ES is not in the list of affected symbols.** The sanity check that strikes bracket the futures price stays in `data/universe.py` as a guard.
+- End-of-month ES options are listed under the root `EW`, not `ES` (which carries the futures and the quarterly options). The option universe for the `monthly_eom` series must be pulled with the `EW` parent; the underlying futures remain `ES`.
 - Databento changed CME normalization (production from 2026-08-08); older tutorials may not match current definition records.
 - Options on non-quarterly expiries have a different underlying future than the same-month future; always use the `underlying` from the definition record.
 - Data licensing: do **not** commit raw Databento data to a public repo. Ship a synthetic data generator for tests and demos instead [stretch].
@@ -394,7 +398,7 @@ Sizes: S ≤ 0.5 day, M ≈ 1–2 days, L ≈ 3+ days. Labels: `infra`, `data`, 
 ## 11. Team workflow and roles
 
 Roles follow the course's suggested process:
-- **Tech leader**: Tanwir Silah 
+- **Tech leader**: Tanwir Silar 
 - **Communication leader:** README PR (#2) and final README (#19).
 - **Design leader(s):** Aryaa Gunavante, Andrew Yang 
 
@@ -440,8 +444,8 @@ Agree and record on GitHub: the communication channel, review turnaround expecta
 2. Sample period and whether a longer daily-only sample is available.
 3. Session definition for realized variance (full Globex vs regular hours).
 4. Snapshot time and ES settlement-time convention.
-5. Return denominator for the strategy: notional, vega, or margin.
-6. Which VRP definition is primary: difference, log ratio, or swap return.
+5. Return denominator for the strategy: notional, vega, or margin. **Decided: entry vega primary; assumed margin fraction secondary (§4.7).**
+6. Which VRP definition is primary: difference, log ratio, or swap return. **Decided: the difference $RV - SW$; log ratio reported alongside for inference (§4.4).**
 
 ---
 
