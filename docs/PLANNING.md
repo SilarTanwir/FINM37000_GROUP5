@@ -392,8 +392,9 @@ Sizes: S ≤ 0.5 day, M ≈ 1–2 days, L ≈ 3+ days. Labels: `infra`, `data`, 
 | 17 | Robustness suite | 11, 16 | M | RV frequency, snapshot time, hedge delta, quote variant, strike-coverage threshold, cost multiplier |
 | 18 | Synthetic data generator and smoke test | 7 | M | `synthetic.py`; full pipeline runs offline in CI |
 | 19 | Reporting and final README | 15, 16, 17 | M | Every README figure produced by a documented command; limitations written |
+| 20 | Option-chain quality and synchronization diagnostics | 5, 6 | M | Daily strike-coverage, quote-age and option/futures synchronization diagnostics; configurable thresholds; failed chains flagged or rejected with reasons; diagnostic summary produced |
 
-**Critical path:** 1 → 3 → 4 → 5/6 → 8 → 9/12 → 14 → 16 → 19. Issues 7, 10, 13 and 18 can run in parallel early.
+Critical path: 1 → 3 → 4 → 5/6 → 20 → 8 → 9/12 → 14 → 16 → 19. Issues 7, 10, 13 and 18 can run in parallel early.
 
 ---
 
