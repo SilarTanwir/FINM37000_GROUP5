@@ -16,5 +16,6 @@ def build_universe(definitions: pd.DataFrame) -> pd.DataFrame:
 
 def check_strikes_bracket_futures(universe: pd.DataFrame, futures_price: float) -> None:
     """Sanity check that strikes bracket the futures price (display-factor issue, §5.3)."""
-    # TODO [VERIFY]: ES series unaffected by the strike_price display-factor issue (§5.3).
+    # ES is not on Databento's list of symbols affected by the strike_price display-factor
+    # issue (§5.3); this check stays as a guard.
     raise NotImplementedError

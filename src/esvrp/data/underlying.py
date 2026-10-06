@@ -10,7 +10,8 @@ import pandas as pd
 
 def build_bars(raw: pd.DataFrame, freq: str, session: str) -> pd.DataFrame:
     """Resample to 5m or daily bars honoring the session definition and maintenance gap."""
-    # TODO [DECISION]: full Globex vs regular hours, and the maintenance-gap treatment (§4.2, §15.3).
+    # Decided (§4.2, §15.3): full Globex; keep the return across the maintenance halt as one
+    # return spanning the gap (gap rule proposed in the README PR).
     raise NotImplementedError
 
 

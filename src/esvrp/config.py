@@ -26,7 +26,7 @@ class DataConfig:
     series: str
     start: date
     end: date
-    snapshot_time_ct: str  # TODO [DECISION]: snapshot time / settlement-time convention (§15.4)
+    snapshot_time_ct: str  # decided: 15:00 CT (§15.4)
     budget_usd: float
 
 
@@ -56,7 +56,7 @@ class StripConfig:
 @dataclass(frozen=True)
 class RealizedConfig:
     frequency: list[str]
-    session: str  # TODO [DECISION]: full_globex | rth (§15.3)
+    session: str  # decided: full_globex (§15.3)
 
 
 @dataclass(frozen=True)

@@ -1,4 +1,4 @@
-# PLANNING.md §8. Items marked DECISION are unresolved; see docs/data.md.
+# PLANNING.md §8. Open and resolved decisions are tracked in docs/data.md.
 data:
   dataset: GLBX.MDP3
   product: ES.FUT
@@ -23,7 +23,7 @@ strip:
   min_front_days: 8            # use next two expiries if nearest is closer (Carr-Wu)
 realized:
   frequency: [daily, 5m]
-  session: full_globex         # full_globex | rth   DECISION
+  session: full_globex         # full_globex | rth   (decided, §15.3)
 hedging:
   hedge_delta: iv_daily        # iv_daily | iv_fixed | rv
   rebalance: daily

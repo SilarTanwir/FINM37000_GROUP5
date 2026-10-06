@@ -21,5 +21,5 @@ class StrategyResult:
 
 def run_strategy(hedged_gains: pd.DataFrame, entry_rule: object, cost_model: object) -> StrategyResult:
     """Sell one hedged ATM straddle monthly at the bid, charge all costs, report tails."""
-    # TODO [DECISION]: return denominator: notional, vega or margin (§4.7, §15.5).
+    # Decided (§4.7, §15.5): entry vega primary; assumed margin fraction secondary.
     raise NotImplementedError

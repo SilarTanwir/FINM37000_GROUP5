@@ -14,7 +14,7 @@ def vrp_table(
     strips: pd.DataFrame, rv: pd.DataFrame, kind: Literal["diff", "log", "swap_return"]
 ) -> pd.DataFrame:
     """RV - SW, ln(RV/SW) or RV/SW - 1 (§4.4)."""
-    # TODO [DECISION]: which VRP definition is primary (§15.6).
+    # Decided (§15.6): RV - SW is primary; ln(RV/SW) reported alongside for inference.
     raise NotImplementedError
 
 

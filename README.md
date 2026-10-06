@@ -13,7 +13,8 @@ We measure the variance risk premium (VRP) two ways and then test whether it is 
 Hypotheses, theory, data plan and the issue roadmap are in [docs/PLANNING.md](docs/PLANNING.md).
 Every outcome is reportable: the premium exists and survives costs, exists but costs consume it, or the methods disagree.
 
-> **Status:** scaffold. Results below will be filled in as issues in `docs/issues/` are completed.
+> **Status:** scaffold. Results below will be filled in as the repository's
+> [GitHub Issues](https://github.com/SilarTanwir/FINM37000_GROUP5/issues) are completed.
 > Only `pricing/black76.py` is implemented; other modules are stubs.
 
 ## Setup
@@ -40,8 +41,19 @@ estimated cost first and aborts if over budget. Raw Databento data is never comm
 ## Layout
 
 See PLANNING.md §7. Code is in `src/esvrp/`, parameters in `config/default.yaml`, tests in `tests/`,
-issue drafts in `docs/issues/`, open verification items in `docs/data.md`.
+task source text in `docs/issues/` (tracked as GitHub Issues), open and resolved decisions in `docs/data.md`.
 
 ## Limitations
 
 Short samples, exercise-style mismatch, data quality and costs; see PLANNING.md §4.8.
+
+## Team
+
+FINM 37000 Project Group 5. Roles for Project Setup (PLANNING.md §11):
+
+| Member | GitHub | Role |
+|---|---|---|
+| Tanwir Silar | [@SilarTanwir](https://github.com/SilarTanwir) | Tech leader (owns the main repository) |
+| Alex Nikolaev | [@alexnikolaevh](https://github.com/alexnikolaevh) | Communication leader |
+| Aryaa Gunavante | [@agunavante](https://github.com/agunavante) | Design leader |
+| Andrew Yang | [@andrewyang27](https://github.com/andrewyang27) | Design leader |

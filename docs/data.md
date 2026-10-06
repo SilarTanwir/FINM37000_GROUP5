@@ -11,19 +11,18 @@ decisions in §15. Each has a `TODO` comment at the point of use in the code.
 
 | # | Type | Item | Plan § | Where in code |
 |---|---|---|---|---|
-| 2 | DECISION | Sample period; whether a longer daily-only sample exists | 15.2 | `config/default.yaml` |
-| 3 | DECISION | Session for realized variance (full Globex vs RTH) and maintenance-gap treatment | 4.2, 15.3 | `data/underlying.py`, `vrp/realized.py`, `config.py` |
-| 4 | DECISION | Snapshot time and ES settlement-time convention (config currently `15:00` CT) | 15.4 | `data/quotes.py`, `config.py` |
-| 7 | DECISION | Whether the CL/EIA extension is in scope | 15.7 | issue #20 |
+| — | — | None open as of the README PR. New items go here with a `TODO` at the point of use in the code. | — | — |
 
 ## Resolved since the first draft
 
 | Item | Resolution |
 |---|---|
-| ES option series | `monthly_eom`; analysis restricted to European options (§4.1, §15.1 still lists it) |
+| ES option series | `monthly_eom`; analysis restricted to European options (§4.1, §15.1) |
 | Exercise style per series | Follows from the series choice above |
 | Parent symbols | Underlying futures: `ES.FUT` (`data.product`). End-of-month options are under the root `EW`, so the `monthly_eom` option universe is pulled with the `EW` parent, not `ES` (§5.3) |
-| Snapshot cutoff | `15:00` CT in config (convention still open, item 4) |
+| Snapshot time (was item 4) | `15:00` CT, checked against ES contract specs; strike coverage at that minute checked in #5 (§15.4) |
+| Realized-variance session (was item 3) | Full Globex. Returns across the maintenance halt, weekends and holidays are kept as one return spanning the gap (gap rule proposed in the README PR, §15.3) |
+| Sample period (was item 2) | Oct 2023 to Sep 2026; 5-minute data cost checked before the first pull (roadmap #3, §15.2) |
 | Databento access, history, cost; schema names; settlement stat type; data licensing | Verified by the team; the `[VERIFY]` tags were removed from the plan |
 | Hedged-gain identity and financing terms | Tag removed from the plan; the identity is documented as the standard Black-Scholes result, distinct from Bakshi-Kapadia's vega-weighted link (§4.5) |
 | "Exploring the Variance Risk Premium Across Assets" | Heston and Todorov (2023), in `docs/references/` |
