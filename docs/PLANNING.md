@@ -386,7 +386,6 @@ Sizes: S ≤ 0.5 day, M ≈ 1–2 days, L ≈ 3+ days. Labels: `infra`, `data`, 
 | 17 | Robustness suite | 11, 16 | M | RV frequency, snapshot time, hedge delta, quote variant, strike-coverage threshold, cost multiplier |
 | 18 | Synthetic data generator and smoke test | 7 | M | `synthetic.py`; full pipeline runs offline in CI |
 | 19 | Reporting and final README | 15, 16, 17 | M | Every README figure produced by a documented command; limitations written |
-| 20 | (stretch) CL options and the EIA release | 8, 12 | L | Does the strip or hedged gain behave differently around Wednesday 10:30 ET EIA releases? |
 
 **Critical path:** 1 → 3 → 4 → 5/6 → 8 → 9/12 → 14 → 16 → 19. Issues 7, 10, 13 and 18 can run in parallel early.
 
@@ -395,10 +394,9 @@ Sizes: S ≤ 0.5 day, M ≈ 1–2 days, L ≈ 3+ days. Labels: `infra`, `data`, 
 ## 11. Team workflow and roles
 
 Roles follow the course's suggested process:
-- **Tech leader** (owns the main repo for the whole course): creates the repo, scaffold (#1), CI, merges PRs.
+- **Tech leader**: Tanwir Silah 
 - **Communication leader:** README PR (#2) and final README (#19).
-- **Design leader(s):** open the issues from §10, refine acceptance criteria, keep the roadmap current.
-- **Everyone:** fork, branch per issue, small PRs referencing the issue number, at least one review on someone else's PR per week, and comment on issues to record agreement.
+- **Design leader(s):** Aryaa Gunavante 
 
 Rules: no secrets in commits; no raw Databento data in git; every PR runs tests; theory changes go through `docs/theory.md` review.
 
@@ -423,7 +421,6 @@ Agree and record on GitHub: the communication channel, review turnaround expecta
 |---|---|---|
 | License or budget does not cover enough option history | Medium | Check first (#3); shorten sample; use settlements/daily for measurement and snapshots only for hedging |
 | Wrong or noisy strikes/quotes | Medium | Strike sanity check; cleaning log; synthetic tests |
-| Exercise-style mismatch | Medium | Choose a European series or document error |
 | Sample dominated by one volatility episode | High | Report sub-samples; state limitation; use a longer daily sample if possible |
 | Scope creep (more products, intraday hedging) | High | Out-of-scope list below; stretch issue only after #19 |
 | Team member bottleneck on tricky modules (#9, #12) | Medium | Pair on L-size issues; write tests first |
@@ -434,7 +431,6 @@ Agree and record on GitHub: the communication channel, review turnaround expecta
 ## 14. Out of scope and stretch
 
 **Out of scope:** other underlyings, VIX products, jump-adjusted hedging, intraday dynamic hedging, event contracts, any live trading.
-**Stretch (only after #19):** CL options around EIA releases (connects to the crude-oil ideas the team discussed); a Heston-type simulation as a stricter synthetic test.
 
 ---
 
@@ -446,7 +442,6 @@ Agree and record on GitHub: the communication channel, review turnaround expecta
 4. Snapshot time and ES settlement-time convention.
 5. Return denominator for the strategy: notional, vega, or margin.
 6. Which VRP definition is primary: difference, log ratio, or swap return.
-7. Whether the CL/EIA extension is promoted into scope.
 
 ---
 
