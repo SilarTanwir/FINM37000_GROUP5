@@ -13,5 +13,6 @@ jobs:
           python-version: "3.11"
       - run: pip install -e ".[dev]"
       - run: ruff check .
+      - run: doit list   # task graph must load (PLANNING.md §6)
       - run: pytest -q
         # No test may call the Databento API; no secrets are provided to CI.
