@@ -69,8 +69,8 @@ def test_pull_universe_unions_weekly_snapshots(tmp_path, monkeypatch):
 
     def fake_fetch(dataset, schema, symbols, start, end, budget_usd, stype_in, client):
         calls.append((schema, symbols, stype_in, str(start)))
-        defs = make_defs()
-        return defs if len(calls) == 1 else defs[defs["instrument_id"] != 1]
+        defs = make_defs()  # id 1 only exists in the first week's snapshot (pulls run in parallel)
+        return defs if str(start) == "2026-09-01" else defs[defs["instrument_id"] != 1]
 
     monkeypatch.setattr(universe, "fetch", fake_fetch)
     cfg = SimpleNamespace(data=SimpleNamespace(dataset="GLBX.MDP3", series="monthly_eom",
