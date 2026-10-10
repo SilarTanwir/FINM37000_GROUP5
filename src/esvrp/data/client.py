@@ -55,15 +55,23 @@ def make_client(key: str | None = None) -> Any:
     return db.Historical(key or get_api_key())
 
 
-def _with_retries(call: Any, *args: Any, attempts: int = 3, wait_s: float = 5.0, **kwargs: Any) -> Any:
-    """Retry transient network failures (timeouts, dropped connections) with a growing wait."""
+def _is_transient(err: Exception) -> bool:
+    """Network timeouts, dropped connections, and Databento 5xx server errors (e.g. 504 gateway timeout)."""
     import requests
 
+    if isinstance(err, (requests.Timeout, requests.ConnectionError)):
+        return True
+    status = getattr(err, "http_status", None)
+    return isinstance(status, int) and status >= 500
+
+
+def _with_retries(call: Any, *args: Any, attempts: int = 5, wait_s: float = 10.0, **kwargs: Any) -> Any:
+    """Retry transient failures with a growing wait; anything else (e.g. a bad request) raises at once."""
     for attempt in range(1, attempts + 1):
         try:
             return call(*args, **kwargs)
-        except (requests.Timeout, requests.ConnectionError) as err:
-            if attempt == attempts:
+        except Exception as err:
+            if not _is_transient(err) or attempt == attempts:
                 raise
             log.warning("Databento request failed (%s); retry %d/%d",
                         type(err).__name__, attempt, attempts - 1)
