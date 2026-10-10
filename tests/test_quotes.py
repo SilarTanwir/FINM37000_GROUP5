@@ -139,3 +139,17 @@ def test_failed_days_reported_after_other_days_finish(monkeypatch):
     with pytest.raises(RuntimeError, match=r"1 day\(s\) failed.*2026-09-02"):
         quotes.pull_snapshots(cfg, UNIVERSE)
     assert sorted(done) == ["2026-09-01", "2026-09-03", "2026-09-04"]
+
+
+def test_holiday_with_no_usable_quotes_returns_empty():
+    # Labor Day 2026: one option record in the window, no prices, nothing at 15:00.
+    holiday = bbo([("2026-09-07 19:50", 99, float("nan"), float("nan"))])
+    assert load_snapshots(UNIVERSE, holiday, "15:00").empty
+    holiday["symbol"] = "ESZ6"
+    assert futures_mid_at_snapshot(holiday.drop(columns="instrument_id"), "15:00").empty
+
+
+def test_completely_empty_pulls_return_empty():
+    empty = bbo([]).assign(symbol=pd.Series(dtype=str))
+    assert load_snapshots(UNIVERSE, empty, "15:00").empty
+    assert futures_mid_at_snapshot(empty.drop(columns="instrument_id"), "15:00").empty

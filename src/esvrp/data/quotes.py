@@ -57,6 +57,8 @@ def load_snapshots(
 ) -> pd.DataFrame:
     """Last bid/ask per option before the snapshot time, one row per option-day."""
     # Decided (§15.4): 15:00 CT. Back-fill strikes with no quote at that minute (§5.2).
+    if bbo.empty:
+        return pd.DataFrame(columns=QUOTE_COLUMNS)
     q = bbo.assign(quote_ts=_quote_time(bbo).to_numpy())
     q["date"] = q["quote_ts"].dt.tz_convert(TZ).dt.date
     snaps = {d: snapshot_ts(d, snapshot_time_ct) for d in q["date"].unique()}
@@ -67,6 +69,8 @@ def load_snapshots(
 
     out = last.merge(universe, on="instrument_id", how="inner")
     out = out[out["expiry"] > out["snapshot_ts"]]  # an option expiring at the snapshot is no longer live
+    if out.empty:  # e.g. holidays with an early close: nothing quoted near the snapshot
+        return pd.DataFrame(columns=QUOTE_COLUMNS)
     out = out.rename(columns={"bid_px_00": "bid", "ask_px_00": "ask", "bid_sz_00": "bid_sz",
                               "ask_sz_00": "ask_sz"})
     out["quote_age_s"] = (out["snapshot_ts"] - out["quote_ts"]).dt.total_seconds()
@@ -76,12 +80,16 @@ def load_snapshots(
 def futures_mid_at_snapshot(futures_bbo: pd.DataFrame, snapshot_time_ct: str,
                             backfill_minutes: int = 15) -> pd.DataFrame:
     """Mid of each futures contract at the snapshot: columns date, underlying, F."""
+    if futures_bbo.empty:
+        return pd.DataFrame(columns=["date", "underlying", "F"])
     f = futures_bbo.assign(quote_ts=_quote_time(futures_bbo).to_numpy())
     f["date"] = f["quote_ts"].dt.tz_convert(TZ).dt.date
     f["snapshot_ts"] = f["date"].map({d: snapshot_ts(d, snapshot_time_ct) for d in f["date"].unique()})
     window = pd.Timedelta(minutes=backfill_minutes)
     f = f[(f["quote_ts"] <= f["snapshot_ts"]) & (f["quote_ts"] > f["snapshot_ts"] - window)]
     f = f.dropna(subset=["bid_px_00", "ask_px_00"])
+    if f.empty:
+        return pd.DataFrame(columns=["date", "underlying", "F"])
     last = f.sort_values("quote_ts").groupby(["date", "symbol"]).tail(1)
     return pd.DataFrame({"date": last["date"], "underlying": last["symbol"],
                          "F": (last["bid_px_00"] + last["ask_px_00"]) / 2}).reset_index(drop=True)
