@@ -104,3 +104,68 @@ def test_key_read_from_env_file_and_never_logged(monkeypatch, tmp_path, caplog):
         fetch(**ARGS, budget_usd=10, cache_dir=tmp_path, client=FakeClient())
     assert "db-secret-123" not in caplog.text
     monkeypatch.delenv(API_KEY_VAR, raising=False)
+
+
+def test_transient_timeout_is_retried(tmp_path, monkeypatch):
+    import requests
+
+    import esvrp.data.client as client_mod
+
+    monkeypatch.setattr(client_mod.time, "sleep", lambda s: None)
+    client = FakeClient()
+    real_get_cost = client.metadata.get_cost
+    failures = iter([True, False])
+
+    def flaky_get_cost(**kw):
+        if next(failures):
+            raise requests.Timeout("read timed out")
+        return real_get_cost(**kw)
+
+    client.metadata.get_cost = flaky_get_cost
+    fetch(**ARGS, budget_usd=10, cache_dir=tmp_path, client=client)
+    assert [name for name, _ in client.calls] == ["get_cost", "get_range"]
+
+
+class FakeServerError(Exception):
+    def __init__(self, http_status):
+        super().__init__(f"HTTP {http_status}")
+        self.http_status = http_status
+
+
+@pytest.mark.parametrize("status,retried", [(504, True), (400, False)])
+def test_server_errors_retried_only_when_5xx(tmp_path, monkeypatch, status, retried):
+    import esvrp.data.client as client_mod
+
+    monkeypatch.setattr(client_mod.time, "sleep", lambda s: None)
+    client = FakeClient()
+    real_get_range = client.timeseries.get_range
+    failures = iter([True, False])
+
+    def flaky_get_range(**kw):
+        if next(failures):
+            raise FakeServerError(status)
+        return real_get_range(**kw)
+
+    client.timeseries.get_range = flaky_get_range
+    if retried:
+        assert len(fetch(**ARGS, budget_usd=10, cache_dir=tmp_path, client=client)) == 2
+    else:
+        with pytest.raises(FakeServerError):
+            fetch(**ARGS, budget_usd=10, cache_dir=tmp_path, client=client)
+
+
+def test_broken_download_is_retried(tmp_path, monkeypatch):
+    import esvrp.data.client as client_mod
+
+    monkeypatch.setattr(client_mod.time, "sleep", lambda s: None)
+    client = FakeClient()
+    real_get_range = client.timeseries.get_range
+    failures = iter([True, False])
+
+    def flaky_get_range(**kw):
+        if next(failures):
+            raise RuntimeError("Error streaming response: ('Connection broken: IncompleteRead(...)')")
+        return real_get_range(**kw)
+
+    client.timeseries.get_range = flaky_get_range
+    assert len(fetch(**ARGS, budget_usd=10, cache_dir=tmp_path, client=client)) == 2

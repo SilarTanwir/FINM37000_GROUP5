@@ -26,6 +26,8 @@ decisions in §15. Each has a `TODO` comment at the point of use in the code.
 | Databento access, history, cost; schema names; settlement stat type; data licensing | Verified by the team; the `[VERIFY]` tags were removed from the plan |
 | Hedged-gain identity and financing terms | Tag removed from the plan; the identity is documented as the standard Black-Scholes result, distinct from Bakshi-Kapadia's vega-weighted link (§4.5) |
 | "Exploring the Variance Risk Premium Across Assets" | Heston and Todorov (2023), in `docs/references/` |
+| Snapshot coverage (stage 2) | `bbo-1m` has a record for nearly every live EW option in the 15:00 CT minute; a 15-minute back-fill (`cleaning.backfill_minutes`) covers the rest. Back-month futures (furthest one or two contracts) can be unquoted; their options are dropped as `no_futures_price`. See `docs/stages/02_snapshots.md` |
+| Degraded-quality days | Databento flags some days as degraded (2024-09-18, 2025-09-17, 2025-09-24 so far); to be surfaced by the chain-quality diagnostics (roadmap 20) |
 | `strike_price` display-factor issue (was item 1) | ES is not in the list of affected symbols on Databento's issue tracker. The strikes-bracket-futures check stays in `data/universe.py` as a guard (§5.3) |
 | Strategy return denominator (was item 5) | Entry vega is primary: trades sized to constant entry vega, P&L per unit vega. Assumed margin fraction is the secondary view; `Π/F` and `Π/O₀` kept for Bakshi-Kapadia comparability only (§4.7, §15.5) |
 | Primary VRP definition (was item 6) | The difference `RV - SW` in variance units (Carr-Wu). Log ratio reported alongside for every significance test; swap return used in the strategy section (§4.4, §15.6) |

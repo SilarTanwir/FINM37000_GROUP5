@@ -14,6 +14,7 @@ import hashlib
 import json
 import logging
 import os
+import time
 from datetime import date, datetime
 from pathlib import Path
 from typing import Any
@@ -54,6 +55,33 @@ def make_client(key: str | None = None) -> Any:
     return db.Historical(key or get_api_key())
 
 
+def _is_transient(err: Exception) -> bool:
+    """Network timeouts, dropped connections, broken downloads, and Databento 5xx server errors."""
+    import requests
+
+    if isinstance(err, (requests.Timeout, requests.ConnectionError)):
+        return True
+    status = getattr(err, "http_status", None)
+    if isinstance(status, int):
+        return status >= 500
+    # Databento wraps a download cut off mid-stream as a generic BentoError with this message.
+    return "Error streaming response" in str(err)
+
+
+def _with_retries(call: Any, *args: Any, attempts: int = 5, wait_s: float = 10.0, **kwargs: Any) -> Any:
+    """Retry transient failures with a growing wait; anything else (e.g. a bad request) raises at once."""
+    for attempt in range(1, attempts + 1):
+        try:
+            return call(*args, **kwargs)
+        except Exception as err:
+            if not _is_transient(err) or attempt == attempts:
+                raise
+            log.warning("Databento request failed (%s); retry %d/%d",
+                        type(err).__name__, attempt, attempts - 1)
+            time.sleep(wait_s * attempt)
+    raise AssertionError("unreachable")
+
+
 def _normalize_symbols(symbols: str | list[str]) -> list[str]:
     return sorted([symbols] if isinstance(symbols, str) else list(symbols))
 
@@ -91,7 +119,7 @@ def estimate_cost(
     """Return Databento's estimated cost in USD; log it before every pull (§5.4.1)."""
     params = request_params(dataset, schema, symbols, start, end, stype_in)
     client = client or make_client()
-    cost = float(client.metadata.get_cost(**params))
+    cost = float(_with_retries(client.metadata.get_cost, **params))
     log.info("Databento cost estimate: $%.2f for %s", cost, params)
     return cost
 
@@ -123,7 +151,7 @@ def fetch(
             f"Estimated cost ${cost:.2f} exceeds budget ${budget_usd:.2f} for {params}"
         )
 
-    df = client.timeseries.get_range(**params).to_df()
+    df = _with_retries(client.timeseries.get_range, **params).to_df()
     data_path.parent.mkdir(parents=True, exist_ok=True)
     df.to_parquet(data_path)
     meta_path.write_text(json.dumps({**params, "estimated_cost_usd": cost, "rows": len(df)}, indent=2))
