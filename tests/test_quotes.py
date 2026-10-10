@@ -119,3 +119,23 @@ def test_missing_futures_price_counted_separately():
     q = pd.concat([chain(), far])
     cleaned, log = clean_quotes(q, cfg=None)
     assert log["no_futures_price"] == 13 and log["chain_min_range"] == 0 and len(cleaned) == 13
+
+
+def test_failed_days_reported_after_other_days_finish(monkeypatch):
+    from types import SimpleNamespace
+
+    import esvrp.data.quotes as quotes
+
+    done = []
+
+    def fake_pull_day(cfg, universe, day, client):
+        if str(day.date()) == "2026-09-02":
+            raise RuntimeError("gateway timeout")
+        done.append(str(day.date()))
+        return pd.DataFrame({"x": [1]})
+
+    monkeypatch.setattr(quotes, "_pull_day", fake_pull_day)
+    cfg = SimpleNamespace(data=SimpleNamespace(start="2026-09-01", end="2026-09-04"))
+    with pytest.raises(RuntimeError, match=r"1 day\(s\) failed.*2026-09-02"):
+        quotes.pull_snapshots(cfg, UNIVERSE)
+    assert sorted(done) == ["2026-09-01", "2026-09-03", "2026-09-04"]

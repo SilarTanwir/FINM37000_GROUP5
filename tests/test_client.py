@@ -152,3 +152,20 @@ def test_server_errors_retried_only_when_5xx(tmp_path, monkeypatch, status, retr
     else:
         with pytest.raises(FakeServerError):
             fetch(**ARGS, budget_usd=10, cache_dir=tmp_path, client=client)
+
+
+def test_broken_download_is_retried(tmp_path, monkeypatch):
+    import esvrp.data.client as client_mod
+
+    monkeypatch.setattr(client_mod.time, "sleep", lambda s: None)
+    client = FakeClient()
+    real_get_range = client.timeseries.get_range
+    failures = iter([True, False])
+
+    def flaky_get_range(**kw):
+        if next(failures):
+            raise RuntimeError("Error streaming response: ('Connection broken: IncompleteRead(...)')")
+        return real_get_range(**kw)
+
+    client.timeseries.get_range = flaky_get_range
+    assert len(fetch(**ARGS, budget_usd=10, cache_dir=tmp_path, client=client)) == 2

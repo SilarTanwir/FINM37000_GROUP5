@@ -173,8 +173,20 @@ def _pull_day(cfg: Any, universe: pd.DataFrame, day: pd.Timestamp, client: Any) 
 def pull_snapshots(cfg: Any, universe: pd.DataFrame, client: Any = None, workers: int = 4) -> pd.DataFrame:
     """Raw (uncleaned) snapshots for every business day in the sample, with F attached."""
     days = pd.bdate_range(cfg.data.start, cfg.data.end)
+    failed: list[str] = []
+
+    def pull(day: pd.Timestamp) -> pd.DataFrame:
+        try:
+            return _pull_day(cfg, universe, day, client)
+        except Exception as err:  # keep going; finished days are cached, so a rerun only redoes these
+            log.error("Day %s failed after retries: %s", day.date(), err)
+            failed.append(str(day.date()))
+            return pd.DataFrame()
+
     with ThreadPoolExecutor(max_workers=workers) as pool:
-        frames = list(pool.map(lambda d: _pull_day(cfg, universe, d, client), days))
+        frames = list(pool.map(pull, days))
+    if failed:
+        raise RuntimeError(f"{len(failed)} day(s) failed; rerun stage 2 to retry them: {sorted(failed)}")
     frames = [f for f in frames if not f.empty]
     if not frames:
         raise ValueError("no option quotes found in the sample")

@@ -56,13 +56,16 @@ def make_client(key: str | None = None) -> Any:
 
 
 def _is_transient(err: Exception) -> bool:
-    """Network timeouts, dropped connections, and Databento 5xx server errors (e.g. 504 gateway timeout)."""
+    """Network timeouts, dropped connections, broken downloads, and Databento 5xx server errors."""
     import requests
 
     if isinstance(err, (requests.Timeout, requests.ConnectionError)):
         return True
     status = getattr(err, "http_status", None)
-    return isinstance(status, int) and status >= 500
+    if isinstance(status, int):
+        return status >= 500
+    # Databento wraps a download cut off mid-stream as a generic BentoError with this message.
+    return "Error streaming response" in str(err)
 
 
 def _with_retries(call: Any, *args: Any, attempts: int = 5, wait_s: float = 10.0, **kwargs: Any) -> Any:
