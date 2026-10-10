@@ -11,7 +11,7 @@ decisions in §15. Each has a `TODO` comment at the point of use in the code.
 
 | # | Type | Item | Plan § | Where in code |
 |---|---|---|---|---|
-| — | — | None open as of the README PR. New items go here with a `TODO` at the point of use in the code. | — | — |
+| 8 | DECISION | Budget semantics on the program's Plus plan: what Databento's cost estimate means when data is covered by the subscription, and whether `data.budget_usd` is per pull or cumulative. `fetch` currently treats it as a per-pull hard stop. | 5.4 | `data/client.py`, `config/default.yaml` |
 
 ## Resolved since the first draft
 
