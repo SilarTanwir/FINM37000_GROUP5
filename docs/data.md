@@ -11,7 +11,7 @@ decisions in §15. Each has a `TODO` comment at the point of use in the code.
 
 | # | Type | Item | Plan § | Where in code |
 |---|---|---|---|---|
-| 8 | DECISION | Budget semantics on the program's Plus plan: what Databento's cost estimate means when data is covered by the subscription, and whether `data.budget_usd` is per pull or cumulative. `fetch` currently treats it as a per-pull hard stop. | 5.4 | `data/client.py`, `config/default.yaml` |
+| 8 | DECISION | Budget semantics on the program's Plus plan: what Databento's cost estimate means when data is covered by the subscription, and whether `data.budget_usd` is per pull or cumulative. `fetch` currently treats it as a per-pull hard stop. **Evidence (Oct 9, Alex's key):** estimates are plan-aware: EW.OPT `definition` and `bbo-1m` for the full Oct 2023–Sep 2026 sample are $0.00; ES.FUT `mbp-10` from Jan 2024 is $1.20 (outside the plan's book-depth history); non-CME data is charged. Proposed: keep the per-pull hard stop as a guard against uncovered pulls, and close this item. | 5.4 | `data/client.py`, `config/default.yaml` |
 
 ## Resolved since the first draft
 
