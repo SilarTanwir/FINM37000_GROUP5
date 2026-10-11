@@ -42,8 +42,9 @@ def task_chain():
     """Stage 4: chain with forward, tau, mid, IV, delta, moneyness."""
     return _stage(4, "chain",
                   [f"{D}/quotes.parquet", f"{D}/underlying_daily.parquet",
-                   "src/esvrp/pricing/black76.py", "src/esvrp/pricing/forward.py"],
-                  [f"{D}/chain.parquet"], "Stage 4")
+                   "src/esvrp/pricing/black76.py", "src/esvrp/pricing/forward.py",
+                   "src/esvrp/pricing/chain.py", "src/esvrp/data/rates.py"],
+                  [f"{D}/chain.parquet", f"{R}/figures/forward_gap.png"], "Stage 4")
 
 
 def task_vrp():

@@ -25,6 +25,10 @@ def run_stage(n: int) -> None:
         from esvrp.data.underlying import run
 
         run(cfg)
+    elif n == 4:
+        from esvrp.pricing.chain import run
+
+        run(cfg)
     else:
         raise NotImplementedError(f"stage {n} is not implemented yet")
 
