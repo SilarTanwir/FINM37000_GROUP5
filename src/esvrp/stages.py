@@ -21,6 +21,10 @@ def run_stage(n: int) -> None:
         from esvrp.data.quotes import run
 
         run(cfg)
+    elif n == 3:
+        from esvrp.data.underlying import run
+
+        run(cfg)
     else:
         raise NotImplementedError(f"stage {n} is not implemented yet")
 
