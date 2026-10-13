@@ -13,6 +13,12 @@ See `docs/PLANNING.md` §6 for inputs, outputs and the theory section (§4.2). C
   option listing (`activation`) to the last option expiry, clipped to `data.start`–`data.end`
   (`contract_windows`). Requests cover whole trade dates, from the 17:00 CT session open of the first to
   the session open after the last.
+- The window then runs 30 days past the last option expiry (`RV_TAIL_DAYS`, still clipped to the sample).
+  The constant 30-day realized variance (§4.3) starts at a snapshot and can outlive the options: a
+  snapshot on 21 August with an option expiring 31 August needs `ESU6` bars to 20 September. The future
+  itself stops trading at 08:30 CT on the third Friday of its month (18 September for `ESU6`), so such a
+  window can still end up to two weeks short. Checked for `ESU6` in September 2026: a bar in every
+  5-minute interval up to that last morning.
 
 Checked on 2026-10-10 with a universe built from every eighth weekly snapshot: 19 contracts (`ESZ3` to
 `ESM8`), 1.2 million 1-minute records, all covered by the program's Plus plan ($0 estimated cost). The

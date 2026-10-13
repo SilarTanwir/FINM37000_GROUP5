@@ -169,8 +169,18 @@ def test_contract_windows_follow_the_options_and_the_sample():
     assert list(w.index) == ["ESH7", "ESZ6"]                      # ESU6 expired, ESM8 not listed yet
     assert (w.loc["ESZ6", "start"], w.loc["ESZ6", "end"]) == (day("2026-09-01"), day("2026-09-30"))
     assert w.loc["ESH7", "start"] == day("2026-09-01")            # unknown listing date: sample start
-    w = contract_windows(UNIVERSE, "2026-08-01", "2026-12-31").set_index("underlying")
+    w = contract_windows(UNIVERSE, "2026-08-01", "2026-12-31", tail_days=0).set_index("underlying")
     assert (w.loc["ESZ6", "start"], w.loc["ESZ6", "end"]) == (day("2026-08-10"), day("2026-11-30"))
+
+
+def test_contract_windows_run_past_the_last_expiry_for_realized_variance():
+    # A 30-day realized-variance window from a late-August snapshot needs ESU6 bars into September.
+    w = contract_windows(UNIVERSE, "2026-08-01", "2026-12-31").set_index("underlying")
+    assert w.loc["ESU6", "end"] == day("2026-09-30")              # last option expiry 31 Aug + 30 days
+    assert w.loc["ESZ6", "end"] == day("2026-12-30")
+    assert w.loc["ESH7", "end"] == day("2026-12-31")              # clipped to the sample
+    # The tail does not bring back a contract whose options all expired before the sample.
+    assert "ESU6" not in set(contract_windows(UNIVERSE, "2026-09-01", "2026-09-30")["underlying"])
 
 
 def test_pull_underlying_requests_each_contract_for_whole_trade_dates(monkeypatch):
