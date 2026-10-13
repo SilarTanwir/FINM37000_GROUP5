@@ -4,8 +4,8 @@ See `docs/PLANNING.md` §6 for inputs, outputs and the theory section (§4.2–4
 variance swap rate (roadmap 9), realized variance (roadmap 10) and the premium (roadmap 11).
 
 Status: roadmaps 9 (strip), 10 (realized variance) and 11 (VRP table, constant maturity, descriptives,
-plots) implemented and tested on simulated data. Not yet wired into `python -m esvrp.stages 5` and not yet
-run on real data (see the TODO at the end). No real
+plots) are implemented, wired into `python -m esvrp.stages 5` / `doit vrp`, and tested end to end on
+simulated data. Not yet run on real data (see the TODO at the end). No real
 data has been run through it yet.
 
 ## Variance-swap strip (`src/esvrp/vrp/strip.py`, roadmap 9)
@@ -115,12 +115,39 @@ NaN handling, Eq. (10) by hand, flat variance preserved under interpolation and 
 rule, bracketing preference, skipped dates, constant-maturity RV against a manual window, descriptives and
 the figures (including empty input).
 
-## TODO: wire stage 5 and run it on real data
+## Running stage 5 (`src/esvrp/vrp/pipeline.py`)
 
-Roadmaps 9-11 are infrastructure only so far. Still to do (roadmap 11 acceptance criteria):
-- Add a stage 5 `run(cfg)` that reads `data/chain.parquet`, `data/underlying_5m.parquet` and
-  `data/underlying_daily.parquet`, then writes `data/strip.parquet`, `data/rv.parquet`, `data/vrp.parquet`
-  (plus the constant-maturity tables), the descriptives table and the three figures.
-- Hook it into `python -m esvrp.stages 5` (`stages.py`) and check the `doit` task `vrp` targets.
-- Run it on the real chains (needs stages 1-4 run locally) and review the results, including the open
-  points in issue #32 (EW expiry time, thin underlying contracts) and the `iv_grid` comparison (#31).
+`python -m esvrp.stages 5` (or `doit vrp`) needs `data/chain.parquet` (stage 4) and
+`data/underlying_5m.parquet` / `data/underlying_daily.parquet` (stage 3). No data is pulled. Outputs:
+
+| File | Content |
+|---|---|
+| `data/strip.parquet` | `strip_table`: `sw_mid`, `sw_bid`, `sw_ask` and strip diagnostics, one row per chain |
+| `data/rv.parquet` | `rv_table`: 5-minute and daily RV, log and simple, return counts and gap diagnostics |
+| `data/vrp.parquet` | `vrp_table`: `sw`, `rv`, `vrp_diff` (primary), `vrp_log`, `vrp_swap_return`, at each expiry's own maturity |
+| `data/strip_cm.parquet`, `rv_cm.parquet`, `vrp_cm.parquet` | The constant 30-day series (Carr-Wu comparable), with `extrapolated` |
+| `reports/tables/vrp_descriptives.csv`, `vrp_cm_descriptives.csv` | `vrp_descriptives` (naive t only) |
+| `reports/figures/sw_vs_rv.png`, `vrp_distribution.png`, `rv_comparison.png` | Plots 1-3 for every chain |
+| `reports/figures/cm_sw_vs_rv.png`, `cm_vrp_distribution.png` | The same for the constant-maturity series |
+
+Config used: `strip.price_col` (which `sw_*` column is the premium's SW; default mid),
+`strip.min_front_days` (8), `cleaning.min_range_pct` (truncation flag) and `realized.frequency` (`rv_5m`
+is the primary RV if `5m` is listed, otherwise `rv_daily`). `strip.method: iv_grid` raises
+`NotImplementedError` until issue #31 is done. The target maturity is fixed at 30 days (`TARGET_DAYS`).
+`run(cfg, data_dir, report_dir)` takes its folders as arguments, which the tests use.
+
+The constant-maturity RV window is 30 calendar days from the snapshot. `end_gap_s` in `rv_cm.parquet`
+shows how far the last bar is from the end of that window; it is large when the bars stop early.
+
+Tests: `tests/test_stage5.py` runs the whole stage on simulated chains and bars (all files written,
+one row per chain, flat-vol swap rate, extrapolation flag, no constant maturity when fewer than two valid
+expiries, unimplemented method, empty chain, the `stages.py` and `dodo.py` wiring).
+
+## TODO: run stage 5 on real data (issue #35, Part B)
+
+- Run stages 1-4 and then stage 5 on the full sample.
+- Sanity-check the strip (truncation flags, `n_strikes`, `max_strike_gap`, bid < mid < ask, levels
+  against VIX) and RV (`start_gap_s`, `end_gap_s`, bar counts, 5-minute vs daily agreement).
+- Review the real VRP series for H1, remembering that t-statistics are naive until roadmap 14.
+- Settle the open points in issue #32 (EW expiry time, thin underlying contracts) and compare with the
+  `iv_grid` variant (#31).

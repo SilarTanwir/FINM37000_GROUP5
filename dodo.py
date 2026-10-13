@@ -51,8 +51,11 @@ def task_vrp():
     """Stage 5: variance swap strip, realized variance, VRP."""
     return _stage(5, "vrp",
                   [f"{D}/chain.parquet", f"{D}/underlying_5m.parquet", f"{D}/underlying_daily.parquet",
-                   "src/esvrp/vrp/strip.py", "src/esvrp/vrp/realized.py", "src/esvrp/vrp/premium.py"],
-                  [f"{D}/strip.parquet", f"{D}/rv.parquet", f"{D}/vrp.parquet"], "Stage 5")
+                   "src/esvrp/vrp/strip.py", "src/esvrp/vrp/realized.py", "src/esvrp/vrp/premium.py",
+                   "src/esvrp/vrp/pipeline.py", "src/esvrp/reporting/figures.py"],
+                  [f"{D}/strip.parquet", f"{D}/rv.parquet", f"{D}/vrp.parquet",
+                   f"{D}/strip_cm.parquet", f"{D}/rv_cm.parquet", f"{D}/vrp_cm.parquet",
+                   f"{R}/tables/vrp_descriptives.csv"], "Stage 5")
 
 
 def task_hedging():
