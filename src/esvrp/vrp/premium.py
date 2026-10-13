@@ -22,7 +22,7 @@ from typing import Literal
 import numpy as np
 import pandas as pd
 
-from esvrp.vrp.realized import RV_COLUMNS, rv_table
+from esvrp.vrp.realized import MAX_GAP_DAYS, RV_COLUMNS, rv_table
 
 KINDS = ("diff", "log", "swap_return")
 KEYS = ["date", "expiry"]
@@ -115,15 +115,19 @@ def constant_maturity(
     return pd.DataFrame(rows, columns=CM_COLUMNS if not rows else None)
 
 
-def constant_maturity_rv(cm: pd.DataFrame, bars_5m: pd.DataFrame, daily: pd.DataFrame) -> pd.DataFrame:
+def constant_maturity_rv(
+    cm: pd.DataFrame, bars_5m: pd.DataFrame, daily: pd.DataFrame, max_gap_days: float = MAX_GAP_DAYS,
+) -> pd.DataFrame:
     """Realized variance over the `target_days` after each snapshot, on the first valid expiry's contract.
 
     `cm` is the output of `constant_maturity`. Returns the `rv_table` columns, keyed by (date, expiry) so
-    it joins to `cm` in `vrp_table`.
+    it joins to `cm` in `vrp_table`. A window the bars do not cover (the contract stops trading or the
+    data end before snapshot + `target_days`) has no RV; see `rv_table`.
     """
     if cm.empty:
         return pd.DataFrame(columns=RV_COLUMNS)
-    return rv_table(cm[["date", "expiry", "underlying", "snapshot_ts", "tau"]], bars_5m, daily)
+    return rv_table(cm[["date", "expiry", "underlying", "snapshot_ts", "tau"]], bars_5m, daily,
+                    max_gap_days)
 
 
 def vrp_descriptives(vrp: pd.DataFrame, columns: tuple[str, ...] = tuple(VRP_COLUMNS)) -> pd.DataFrame:

@@ -142,3 +142,61 @@ def test_bad_arguments(bars5m):
     with pytest.raises(ValueError):
         returns_from_bars(bars5m, "5m", kind="percent")
     assert returns_from_bars(bars5m.iloc[0:0], "5m").empty
+
+
+# --- windows the bars do not cover (Tanwir's review of #36) ------------------------------------------
+
+def _one_chain(expiry, snap=None, underlying=SYMBOL):
+    snap = snap if snap is not None else _ct("2026-10-12 15:00")
+    return pd.DataFrame({"date": [pd.Timestamp("2026-10-12").date()], "expiry": [expiry],
+                         "underlying": [underlying], "snapshot_ts": [snap],
+                         "tau": [(expiry - snap).total_seconds() / (365 * 86400)]})
+
+
+def test_rv_is_empty_when_the_option_expires_after_the_bars_end(bars5m):
+    """Summing the returns that exist and dividing by the full tau would understate RV; leave it empty."""
+    last_bar = bars5m["ts"].max()
+    out = rv_table(_one_chain(last_bar + pd.Timedelta(days=10)), bars5m, bars5m.iloc[0:0].assign(settle=[]))
+    row = out.iloc[0]
+    assert math.isnan(row["rv_5m"]) and math.isnan(row["rv_5m_simple"])
+    assert not row["complete_5m"] and row["end_gap_s"] == pytest.approx(10 * 86400)
+    assert row["n_5m"] > 0  # the returns that exist are still counted
+
+
+def test_tolerance_is_configurable_and_a_weekend_is_not_a_gap(bars5m):
+    last_bar = bars5m["ts"].max()
+    chains = _one_chain(last_bar + pd.Timedelta(days=1.5))
+    daily = bars5m.iloc[0:0].assign(settle=[])
+    assert rv_table(chains, bars5m, daily)["complete_5m"].iloc[0]  # within the default 2 days
+    assert rv_table(chains, bars5m, daily)["rv_5m"].notna().iloc[0]
+    strict = rv_table(chains, bars5m, daily, max_gap_days=1.0)
+    assert not strict["complete_5m"].iloc[0] and math.isnan(strict["rv_5m"].iloc[0])
+
+
+def test_rv_is_empty_when_the_snapshot_is_long_after_the_base_bar(bars5m):
+    last_bar = bars5m["ts"].max()
+    snap = last_bar + pd.Timedelta(days=5)
+    out = rv_table(_one_chain(snap + pd.Timedelta(days=3), snap), bars5m, bars5m.iloc[0:0].assign(settle=[]))
+    assert math.isnan(out["rv_5m"].iloc[0]) and out["start_gap_s"].iloc[0] > 4 * 86400
+
+
+def test_daily_rv_is_empty_when_settlements_stop_early(bars5m):
+    dates = ["2026-10-12", "2026-10-13", "2026-10-14"]
+    daily = pd.DataFrame({"underlying": SYMBOL, "date": [pd.Timestamp(d).date() for d in dates],
+                          "settle": [5000.0, 5010.0, 5005.0]})
+    expiry = _ct("2026-10-16 15:00")
+    row = rv_table(_one_chain(expiry), bars5m, daily).iloc[0]
+    assert row["complete_5m"] and row["rv_5m"] > 0  # the 5-minute bars cover the window
+    assert row["complete_daily"] and row["rv_daily"] > 0  # last settlement 10-14 is 2 days before 10-16
+    late = rv_table(_one_chain(_ct("2026-10-19 15:00")), bars5m, daily, max_gap_days=2).iloc[0]
+    assert not late["complete_daily"] and math.isnan(late["rv_daily"])
+    assert late["end_gap_days"] == pytest.approx(5.0) and late["n_daily"] == 2
+
+
+def test_complete_and_incomplete_windows_side_by_side(bars5m):
+    snap, last_bar = _ct("2026-10-12 15:00"), bars5m["ts"].max()
+    chains = pd.concat([_one_chain(_ct("2026-10-16 15:00")), _one_chain(last_bar + pd.Timedelta(days=20))])
+    out = rv_table(chains, bars5m, bars5m.iloc[0:0].assign(settle=[]))
+    assert out["complete_5m"].tolist() == [True, False]
+    assert out["rv_5m"].notna().tolist() == [True, False]
+    assert snap < last_bar

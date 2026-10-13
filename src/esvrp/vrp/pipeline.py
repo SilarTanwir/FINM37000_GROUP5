@@ -58,13 +58,13 @@ def run(cfg: Any, data_dir: Path = DATA_DIR, report_dir: Path = REPORT_DIR) -> d
     rv_col = "rv_5m" if "5m" in cfg.realized.frequency else "rv_daily"
 
     # Each expiry at its own maturity (matched horizon, §4.3).
-    strips = strip_table(chain, cfg.cleaning.min_range_pct)
-    rv = rv_table(chain[CHAIN_KEYS], bars_5m, daily)
+    strips = strip_table(chain, cfg.cleaning.min_range_pct, cfg.strip.min_iv, cfg.strip.max_iv)
+    rv = rv_table(chain[CHAIN_KEYS], bars_5m, daily, cfg.realized.max_gap_days)
     vrp = vrp_table(strips, rv, "diff", sw_col=sw_col, rv_col=rv_col)
 
     # Constant 30-day maturity, the series comparable to Carr-Wu (Eq. 10).
     cm = constant_maturity(strips, TARGET_DAYS, cfg.strip.min_front_days)
-    rv_cm = constant_maturity_rv(cm, bars_5m, daily)
+    rv_cm = constant_maturity_rv(cm, bars_5m, daily, cfg.realized.max_gap_days)
     vrp_cm = vrp_table(cm, rv_cm, "diff", sw_col=sw_col, rv_col=rv_col) if len(cm) else cm
 
     tables = {"strip": strips, "rv": rv, "vrp": vrp, "strip_cm": cm, "rv_cm": rv_cm, "vrp_cm": vrp_cm}
@@ -83,7 +83,12 @@ def run(cfg: Any, data_dir: Path = DATA_DIR, report_dir: Path = REPORT_DIR) -> d
         sw_vs_rv_figure(vrp_cm, figures / "cm_sw_vs_rv.png")
         vrp_distribution_figure(vrp_cm, figures / "cm_vrp_distribution.png")
 
-    log.info("Stage 5: %d chains, %d with a premium (mean RV - SW %.5f); %d constant-maturity dates "
-             "(%d extrapolated) -> %s", len(strips), int(vrp["vrp_diff"].notna().sum()),
-             vrp["vrp_diff"].mean(), len(cm), int(cm["extrapolated"].sum()) if len(cm) else 0, data_dir)
+    log.info("Stage 5: %d chains, %d with a premium (mean RV - SW %.5f); %d chains left out because the bars "
+             "do not cover the window (max_gap_days=%s); %d quotes dropped by the implied-vol bounds; "
+             "%d constant-maturity dates (%d extrapolated, %d with a premium) -> %s",
+             len(strips), int(vrp["vrp_diff"].notna().sum()), vrp["vrp_diff"].mean(),
+             int((~rv["complete_" + ("5m" if rv_col == "rv_5m" else "daily")]).sum()),
+             cfg.realized.max_gap_days, int(strips["n_dropped_iv"].sum()), len(cm),
+             int(cm["extrapolated"].sum()) if len(cm) else 0,
+             int(vrp_cm["vrp_diff"].notna().sum()) if len(cm) else 0, data_dir)
     return tables

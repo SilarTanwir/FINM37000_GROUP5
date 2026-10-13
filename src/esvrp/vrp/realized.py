@@ -19,6 +19,12 @@ twice (§4.2, §15.3).
   date, and the last is the last settlement on or before the expiry's trade date. Days without a
   settlement (shortened holiday sessions) are skipped, which gives one return spanning the gap.
 - `kind`: `log` (baseline) or `simple` (Carr-Wu use simple returns; robustness variant).
+
+A window the bars do not cover is not a short window, it is a missing one: summing the returns that exist
+and dividing by the full `tau` would understate RV and bias the premium. `rv_table` therefore leaves RV
+empty (NaN) when the first or last bar misses its end of the window by more than `max_gap_days`
+(default 2: a weekend or a holiday), and says so in `complete_5m` / `complete_daily`. The gaps are kept
+in `start_gap_s`, `end_gap_s` (5-minute, seconds) and `start_gap_days`, `end_gap_days` (daily).
 """
 
 from __future__ import annotations
@@ -32,10 +38,12 @@ from esvrp.data.underlying import SESSIONS, trade_date
 
 FREQS = {"5m": "5m", "1d": "1d", "daily": "1d"}
 KINDS = ("log", "simple")
+MAX_GAP_DAYS = 2.0  # default tolerance for the bars missing either end of a window (a weekend or holiday)
 RV_COLUMNS = [
     "date", "expiry", "underlying", "tau",
     "rv_5m", "rv_5m_simple", "rv_daily", "rv_daily_simple",
-    "n_5m", "n_daily", "start_gap_s", "end_gap_s",
+    "n_5m", "n_daily", "start_gap_s", "end_gap_s", "start_gap_days", "end_gap_days",
+    "complete_5m", "complete_daily",
 ]
 
 
@@ -121,15 +129,20 @@ def returns_from_bars(
     return pd.Series(r, index=idx.tz_localize("UTC") if freq == "5m" else idx.date, name="ret")
 
 
-def rv_table(chains: pd.DataFrame, bars_5m: pd.DataFrame, daily: pd.DataFrame) -> pd.DataFrame:
+def rv_table(
+    chains: pd.DataFrame, bars_5m: pd.DataFrame, daily: pd.DataFrame, max_gap_days: float = MAX_GAP_DAYS,
+) -> pd.DataFrame:
     """Realized variance for every chain (date, expiry); one row per chain.
 
     `chains` needs `date`, `expiry`, `underlying`, `snapshot_ts` and `tau` (stage 4, or the strip table
     joined with `snapshot_ts`). Columns: `rv_5m` and `rv_daily` (log returns), their `_simple` variants,
-    `n_5m` and `n_daily` (returns used), and `start_gap_s` / `end_gap_s`: seconds between the snapshot
-    and the base bar, and between the last bar and the expiry, for the 5-minute series. Large gaps
-    mark thin windows or an expiry that does not match the bars (issue on EW expiry and thin contracts).
+    `n_5m` and `n_daily` (returns used), and the gaps: `start_gap_s` / `end_gap_s`, seconds between the
+    snapshot and the base bar and between the last bar and the expiry (5-minute), and `start_gap_days` /
+    `end_gap_days` for the daily settlements. If either gap exceeds `max_gap_days` the window is not
+    covered by the data: the RV columns of that frequency are NaN and `complete_5m` / `complete_daily`
+    is False. Large gaps also mark thin windows or an expiry that does not match the bars (issue #32).
     """
+    tol_s = max_gap_days * 86400.0
     c = chains.drop_duplicates(["date", "expiry"]).sort_values(["date", "expiry"]).reset_index(drop=True)
     snap = pd.to_datetime(c["snapshot_ts"], utc=True).dt.as_unit("ns")
     exp = pd.to_datetime(c["expiry"], utc=True).dt.as_unit("ns")
@@ -148,13 +161,19 @@ def rv_table(chains: pd.DataFrame, bars_5m: pd.DataFrame, daily: pd.DataFrame) -
         for freq, lo, hi, tag in (("5m", snap[i].value, exp[i].value, "5m"),
                                   ("1d", snap_date[i].value, exp_date[i].value, "daily")):
             t, px = series[(u, freq)]
+            _, base, last = _returns(t, px, lo, hi, "log")
+            start_gap = (lo - t[base]) / 1e9 if base >= 0 else nan  # seconds
+            end_gap = (hi - t[last]) / 1e9 if last >= 0 else nan
+            complete = bool(start_gap <= tol_s and end_gap <= tol_s)  # False if NaN
+            if freq == "5m":
+                out["start_gap_s"], out["end_gap_s"] = start_gap, end_gap
+            else:
+                out["start_gap_days"], out["end_gap_days"] = start_gap / 86400, end_gap / 86400
+            out[f"complete_{tag}"] = complete
             for kind, suffix in (("log", ""), ("simple", "_simple")):
-                r, base, last = _returns(t, px, lo, hi, kind)
-                out[f"rv_{tag}{suffix}"] = realized_variance(r, tau)
+                r, _, _ = _returns(t, px, lo, hi, kind)
+                out[f"rv_{tag}{suffix}"] = realized_variance(r, tau) if complete else nan
                 if kind == "log":
                     out[f"n_{tag}"] = int(r.size)
-                    if freq == "5m":
-                        out["start_gap_s"] = (lo - t[base]) / 1e9 if base >= 0 else nan
-                        out["end_gap_s"] = (hi - t[last]) / 1e9 if last >= 0 else nan
         rows.append(out)
     return pd.DataFrame(rows)[RV_COLUMNS]

@@ -22,9 +22,12 @@ strip:
   price_col: mid               # mid | bid | ask
   maturity_mode: matched       # matched | constant_30d
   min_front_days: 8            # use next two expiries if nearest is closer (Carr-Wu)
+  max_iv: 1.0                  # drop strip inputs with implied vol above this (Bakshi-Kapadia: 100%)
+  min_iv: 0.01                 # ... or below this (Bakshi-Kapadia: 1%)
 realized:
   frequency: [daily, 5m]
   session: full_globex         # full_globex | rth   (decided, §15.3)
+  max_gap_days: 2              # leave RV empty if the bars miss either end of the window by more
 hedging:
   hedge_delta: iv_daily        # iv_daily | iv_fixed | rv
   rebalance: daily

@@ -25,6 +25,12 @@ Input: one chain of `data/chain.parquet` (one expiry on one day, §4.1) with its
   and the subtracted `correction`.
 - `price_col` is `mid`, `bid` or `ask`. Quotes with a missing or non-positive price are ignored, so a
   one-sided quote enters the `bid` strip but not `mid` or `ask`. Carr-Wu report all three (§4.3).
+- **Implied-vol bounds:** quotes whose implied vol is outside [`strip.min_iv`, `strip.max_iv`] (1% to 100%, as
+  in Bakshi-Kapadia) are dropped before the strip is built, in every variant. A single junk quote far from
+  the money can otherwise dominate the sum: a user-defined `EWQ6 C10100` call quoted at about 508% vol
+  contributed 1.00 to a swap rate of about 0.03. The chain's `iv` (mid) is used where it exists; quotes
+  without one (one-sided quotes) get their implied vol from the price used. `n_dropped_iv` counts them;
+  `max_iv=None` turns the cap off.
 - `truncation_flag` is set when the strikes do not span `F(1 - m)` to `F(1 + m)` with
   `m = cleaning.min_range_pct` (10%). Truncation biases `SW` downward.
 - Invalid `F` or `tau`, or no usable OTM option, gives NaN with `n_strikes == 0`.
@@ -79,6 +85,14 @@ annualized on the same calendar-year basis (§4.2).
   the snapshot to the base bar and from the last bar to the expiry), which flag thin windows or an
   expiry that does not match the bars.
 - `session` is validated here; the full-Globex / RTH filter is applied when the bars are built (stage 3).
+- **Windows the bars do not cover have no RV.** If the first or last bar misses its end of the window by
+  more than `realized.max_gap_days` (default 2: a weekend or a holiday), the RV columns of that frequency are
+  NaN and `complete_5m` / `complete_daily` is False. Summing the returns that exist and dividing by the full
+  `tau` would understate RV and bias the premium toward H1. The gaps stay in `start_gap_s`, `end_gap_s`
+  (5-minute) and `start_gap_days`, `end_gap_days` (daily). This happens when the data end before an
+  expiry, when a contract stops trading before a constant 30-day window ends (the third Friday of its
+  month), or when stage 3 stopped pulling a contract at its last option expiry (see the 30-day tail in
+  stage 3). The premium of such a chain is NaN and the descriptives leave it out.
 
 Open, to settle on the real data (issue #32): the actual expiry time of EW options, and thin underlying
 contracts (sparse or stale 5-minute bars).

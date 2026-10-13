@@ -73,7 +73,7 @@ def test_bid_mid_ask_ordering(flat_vol_chain):
 def test_one_sided_quotes_only_enter_bid_variant(flat_vol_chain):
     chain, F, r, tau = flat_vol_chain(sigma=0.2)
     chain = chain.assign(bid=chain["mid"], ask=chain["mid"])
-    far = chain["strike"] < 3000
+    far = chain["strike"] < 4500
     chain.loc[far, ["ask", "mid"]] = np.nan  # one-sided: bid only
     n_mid = variance_swap_rate(chain, F, r, tau, "mid").n_strikes
     n_bid = variance_swap_rate(chain, F, r, tau, "bid").n_strikes
@@ -88,7 +88,7 @@ def test_missing_k0_side_is_flagged():
 
 def test_missing_strikes_widen_dk(flat_vol_chain):
     chain, F, r, tau = flat_vol_chain(sigma=0.2, step=10.0)
-    gappy = chain[~chain["strike"].between(3000, 3100, inclusive="neither")]  # a zero-bid hole
+    gappy = chain[~chain["strike"].between(4400, 4500, inclusive="neither")]  # a zero-bid hole
     res = variance_swap_rate(gappy, F, r, tau)
     assert res.max_strike_gap > 10.0
     assert res.sw == pytest.approx(variance_swap_rate(chain, F, r, tau).sw, rel=0.02)
@@ -129,3 +129,62 @@ def test_sw_does_not_depend_on_where_f_falls_between_strikes(F):
     assert res.sw == pytest.approx(sigma**2, rel=1e-4)
     if F != res.k0:
         assert abs(res.sw - sigma**2) < abs(res.sw + res.correction - sigma**2)
+
+
+def _with_junk_call(chain, F, r, tau, strike=10100.0, iv=5.08):
+    junk = pd.DataFrame({"strike": [strike], "cp": ["c"], "mid": [price(F, strike, tau, r, iv, "c")]})
+    junk["bid"] = junk["ask"] = junk["mid"]
+    return pd.concat([chain, junk], ignore_index=True)
+
+
+def test_junk_far_quote_is_capped_out(flat_vol_chain):
+    """A single far-out call quoted at ~500% vol must not move the swap rate (Tanwir's EWQ6 C10100 case)."""
+    chain, F, r, tau = flat_vol_chain(sigma=0.2, hi=1.3)
+    clean = variance_swap_rate(chain, F, r, tau)
+    dirty = _with_junk_call(chain, F, r, tau)
+    capped = variance_swap_rate(dirty, F, r, tau)
+    assert capped.sw == pytest.approx(clean.sw, rel=1e-9)
+    assert capped.n_dropped_iv == clean.n_dropped_iv + 1
+    uncapped = variance_swap_rate(dirty, F, r, tau, max_iv=None)
+    assert uncapped.sw > 2 * clean.sw  # without the cap the junk quote dominates the sum
+
+
+def test_cap_applies_to_every_variant_and_to_one_sided_quotes(flat_vol_chain):
+    chain, F, r, tau = flat_vol_chain(sigma=0.2, hi=1.3)
+    dirty = _with_junk_call(chain, F, r, tau)
+    base = {c: variance_swap_rate(chain.assign(bid=chain["mid"], ask=chain["mid"]), F, r, tau, c).sw
+            for c in ("bid", "mid", "ask")}
+    dirty = dirty.assign(bid=dirty["mid"], ask=dirty["mid"])
+    for col in ("bid", "mid", "ask"):
+        assert variance_swap_rate(dirty, F, r, tau, col).sw == pytest.approx(base[col], rel=1e-9)
+    one_sided = dirty.copy()
+    one_sided.loc[one_sided["strike"] == 10100.0, ["ask", "mid"]] = np.nan  # a bid-only junk quote
+    assert variance_swap_rate(one_sided, F, r, tau, "bid").sw == pytest.approx(base["bid"], rel=1e-9)
+
+
+def test_chain_iv_column_is_used_when_present(flat_vol_chain):
+    """With an `iv` column the cap follows it, so a quote with iv above the cap goes even at a fair price."""
+    chain, F, r, tau = flat_vol_chain(sigma=0.2, hi=1.3)
+    chain = chain.assign(iv=0.2)
+    chain.loc[chain["strike"] == 5500.0, "iv"] = 3.0
+    res = variance_swap_rate(chain, F, r, tau)
+    assert 5500.0 not in res.contributions.index
+    assert variance_swap_rate(chain, F, r, tau, max_iv=None).contributions.index.isin([5500.0]).any()
+
+
+def test_iv_bounds_can_be_changed(flat_vol_chain):
+    chain, F, r, tau = flat_vol_chain(sigma=0.2, hi=1.3)
+    assert variance_swap_rate(chain, F, r, tau, min_iv=0.25).n_strikes == 0  # every quote is at 20% vol
+    assert variance_swap_rate(chain, F, r, tau, max_iv=0.15).n_strikes == 0
+
+
+def test_strip_table_reports_dropped_quotes(flat_vol_chain):
+    from esvrp.vrp.strip import strip_table
+
+    chain, F, r, tau = flat_vol_chain(sigma=0.2, hi=1.3)
+    chain = _with_junk_call(chain, F, r, tau).assign(
+        date="2026-09-15", expiry="2026-10-30", underlying="ESZ6", F=F, r=r, tau=tau)
+    chain = chain.assign(bid=chain["mid"], ask=chain["mid"])
+    row = strip_table(chain).iloc[0]
+    assert row["n_dropped_iv"] >= 1 and row["sw_mid"] == pytest.approx(0.2**2, rel=0.01)
+    assert strip_table(chain, max_iv=None).iloc[0]["sw_mid"] > 2 * row["sw_mid"]

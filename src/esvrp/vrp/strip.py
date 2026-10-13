@@ -34,6 +34,8 @@ from dataclasses import dataclass, field
 import numpy as np
 import pandas as pd
 
+from esvrp.pricing.black76 import implied_vols
+
 PRICE_COLUMNS = ("mid", "bid", "ask")
 
 
@@ -49,24 +51,46 @@ class StripResult:
     max_strike_gap: float = float("nan")  # widest dK between used strikes (discretization diagnostic)
     k0_one_sided: bool = False  # only a call or only a put was available at K0
     correction: float = float("nan")  # the (F/K0 - 1)^2 / tau term that was subtracted
+    n_dropped_iv: int = 0  # quotes removed because their implied vol was outside [min_iv, max_iv]
 
 
-def _empty(truncation: bool = True) -> StripResult:
+def _empty(truncation: bool = True, n_dropped_iv: int = 0) -> StripResult:
     nan = float("nan")
-    return StripResult(nan, nan, 0, nan, nan, truncation, pd.Series(dtype=float))
+    return StripResult(nan, nan, 0, nan, nan, truncation, pd.Series(dtype=float), n_dropped_iv=n_dropped_iv)
+
+
+def _within_iv_bounds(
+    q: pd.DataFrame, F: float, r: float, tau: float, min_iv: float, max_iv: float | None
+) -> pd.Series:
+    """True for quotes whose implied vol lies in [min_iv, max_iv].
+
+    Uses the chain's `iv` (mid) where there is one; quotes without it (one-sided quotes, or a slice
+    without an `iv` column) get their implied vol from the price being used. A price that has no implied
+    vol (outside the no-arbitrage bounds or the solver's bracket) is dropped too.
+    """
+    iv = q["iv"].astype(float) if "iv" in q else pd.Series(np.nan, index=q.index)
+    missing = iv.isna()
+    if missing.any():
+        m = q[missing]
+        iv.loc[missing] = implied_vols(m["price"], F, m["strike"], tau, r, m["cp"])
+    upper = np.inf if max_iv is None else max_iv
+    return (iv >= min_iv) & (iv <= upper)
 
 
 def variance_swap_rate(
     chain_slice: pd.DataFrame, F: float, r: float, tau: float, price_col: str = "mid",
-    min_range_pct: float = 0.10,
+    min_range_pct: float = 0.10, min_iv: float = 0.01, max_iv: float | None = 1.0,
 ) -> StripResult:
     """VIX-style discrete strip (baseline) with bid/mid/ask variants.
 
     `chain_slice` is one expiry on one day with columns `strike`, `cp` ("c" or "p") and `price_col`.
     Quotes with a missing or non-positive price are ignored, so one-sided quotes enter the `bid` variant
-    but not `mid` or `ask`. Returns NaN (and `n_strikes == 0`) if `F` or `tau` is invalid or no OTM
-    option is available. `truncation_flag` is set when the strikes do not span at least
-    F(1 - min_range_pct) to F(1 + min_range_pct), which biases SW downward (§4.3, error 1).
+    but not `mid` or `ask`. Quotes with an implied vol outside [`min_iv`, `max_iv`] (default 1% to 100%,
+    as in Bakshi-Kapadia) are dropped before the strip is built, because a single junk quote far from the
+    money can dominate the sum (`n_dropped_iv` counts them); `max_iv=None` turns the cap off. Returns
+    NaN (and `n_strikes == 0`) if `F` or `tau` is invalid or no OTM option is available.
+    `truncation_flag` is set when the strikes do not span at least F(1 - min_range_pct) to
+    F(1 + min_range_pct), which biases SW downward (§4.3, error 1).
     """
     # See also strip.method iv_grid (Carr-Wu implementation) in §4.3.
     if price_col not in PRICE_COLUMNS:
@@ -74,10 +98,16 @@ def variance_swap_rate(
     if not (np.isfinite(F) and F > 0 and np.isfinite(tau) and tau > 0 and np.isfinite(r)):
         return _empty()
 
-    q = chain_slice[["strike", "cp", price_col]].rename(columns={price_col: "price"})
+    cols = ["strike", "cp", price_col, *(["iv"] if "iv" in chain_slice else [])]
+    q = chain_slice[cols].rename(columns={price_col: "price"})
     q = q[q["price"].notna() & (q["price"] > 0) & q["strike"].notna()]
+    n_dropped_iv = 0
+    if len(q):
+        ok = _within_iv_bounds(q, F, r, tau, min_iv, max_iv)
+        n_dropped_iv = int((~ok).sum())
+        q = q[ok]
     if q.empty or not (q["strike"] <= F).any():
-        return _empty()
+        return _empty(n_dropped_iv=n_dropped_iv)
     k0 = float(q.loc[q["strike"] <= F, "strike"].max())
 
     # Average if a strike has duplicate quotes, then pivot to one put and one call column per strike.
@@ -92,7 +122,7 @@ def variance_swap_rate(
     k0_one_sided = bool(at_k0.any() and px.loc[at_k0, ["p", "c"]].isna().any(axis=None))
     otm = otm.dropna()
     if otm.empty:
-        return _empty()
+        return _empty(n_dropped_iv=n_dropped_iv)
 
     strikes = otm.index.to_numpy(dtype=float)
     if len(strikes) == 1:
@@ -112,11 +142,13 @@ def variance_swap_rate(
         sw=sw, k0=k0, n_strikes=len(strikes), strike_min=lo, strike_max=hi, truncation_flag=truncated,
         contributions=contributions,
         max_strike_gap=float(np.nanmax(dk)) if len(strikes) > 1 else float("nan"),
-        k0_one_sided=k0_one_sided, correction=float(correction),
+        k0_one_sided=k0_one_sided, correction=float(correction), n_dropped_iv=n_dropped_iv,
     )
 
 
-def strip_table(chain: pd.DataFrame, min_range_pct: float = 0.10) -> pd.DataFrame:
+def strip_table(
+    chain: pd.DataFrame, min_range_pct: float = 0.10, min_iv: float = 0.01, max_iv: float | None = 1.0,
+) -> pd.DataFrame:
     """Run the strip on every chain (date, expiry) of `chain.parquet`; one row per chain.
 
     Uses the chain's own `F`, `r` and `tau` (stage 4). Columns: date, expiry, underlying, tau, F,
@@ -126,7 +158,8 @@ def strip_table(chain: pd.DataFrame, min_range_pct: float = 0.10) -> pd.DataFram
     rows = []
     for (date, expiry), g in chain.groupby(["date", "expiry"], sort=True):
         F, r, tau = float(g["F"].iloc[0]), float(g["r"].iloc[0]), float(g["tau"].iloc[0])
-        res = {col: variance_swap_rate(g, F, r, tau, col, min_range_pct) for col in PRICE_COLUMNS}
+        res = {col: variance_swap_rate(g, F, r, tau, col, min_range_pct, min_iv, max_iv)
+               for col in PRICE_COLUMNS}
         mid = res["mid"]
         rows.append({
             "date": date, "expiry": expiry, "underlying": g["underlying"].iloc[0], "tau": tau, "F": F,
@@ -134,6 +167,6 @@ def strip_table(chain: pd.DataFrame, min_range_pct: float = 0.10) -> pd.DataFram
             "sw_mid": mid.sw, "sw_bid": res["bid"].sw, "sw_ask": res["ask"].sw, "k0": mid.k0,
             "n_strikes": mid.n_strikes, "strike_min": mid.strike_min, "strike_max": mid.strike_max,
             "truncation_flag": mid.truncation_flag, "max_strike_gap": mid.max_strike_gap,
-            "k0_one_sided": mid.k0_one_sided, "correction": mid.correction,
+            "k0_one_sided": mid.k0_one_sided, "correction": mid.correction, "n_dropped_iv": mid.n_dropped_iv,
         })
     return pd.DataFrame(rows)

@@ -106,8 +106,14 @@ def _finish(fig, title: str, summary: str, out_path: Path) -> Path:
     return out_path
 
 
-def _dates(df: pd.DataFrame) -> pd.Series:
-    return pd.to_datetime(df["date"])
+def _complete(df: pd.DataFrame, columns: list[str]) -> pd.DataFrame:
+    """Rows with every column present, with `date` as a datetime.
+
+    (Assigning a column onto an emptied frame would bring the dropped rows back, so convert in place.)
+    """
+    d = df.dropna(subset=columns).copy()
+    d["date"] = pd.to_datetime(d["date"])
+    return d
 
 
 def _date_axis(ax) -> None:
@@ -127,7 +133,7 @@ def sw_vs_rv_figure(vrp: pd.DataFrame, out_path: Path) -> Path:
     `vrp` has `date`, `sw` and `rv` (from `premium.vrp_table`). Left: daily median of each. Right: one
     point per chain; points below the line have RV < SW, a negative premium.
     """
-    d = vrp.dropna(subset=["sw", "rv"]).assign(date=_dates(vrp))
+    d = _complete(vrp, ["sw", "rv"])
     fig, (left, right) = _canvas((11, 4.6), 2, [2.4, 1])
     _style(left, "", "Variance (annualized)")
     _date_axis(left)
@@ -155,7 +161,7 @@ def vrp_distribution_figure(vrp: pd.DataFrame, out_path: Path, window: int = 21)
 
     `vrp` has `date` and `vrp_diff`. Right: daily median premium and its `window`-day rolling mean.
     """
-    d = vrp.dropna(subset=["vrp_diff"]).assign(date=_dates(vrp))
+    d = _complete(vrp, ["vrp_diff"])
     fig, (left, right) = _canvas((11, 4.6), 2, [1, 2.4])
     _style(left, "RV - SW", "Chains")
     lo, hi = d["vrp_diff"].quantile([0.005, 0.995]) if len(d) else (-1.0, 1.0)
@@ -188,7 +194,7 @@ def rv_comparison_figure(rv: pd.DataFrame, out_path: Path) -> Path:
     `rv` has `date`, `rv_daily` and `rv_5m` (from `realized.rv_table`). Left: daily median of each.
     Right: one point per chain.
     """
-    d = rv.dropna(subset=["rv_daily", "rv_5m"]).assign(date=_dates(rv))
+    d = _complete(rv, ["rv_daily", "rv_5m"])
     fig, (left, right) = _canvas((11, 4.6), 2, [2.4, 1])
     _style(left, "", "Realized variance (annualized)")
     _date_axis(left)

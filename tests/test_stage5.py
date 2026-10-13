@@ -73,8 +73,11 @@ def test_stage5_constant_maturity_flags_extrapolation_and_missing_window(stage_i
     cm = t["strip_cm"]
     assert len(cm) == len(SNAPS) and cm["extrapolated"].all()  # both expiries are before 30 days
     assert cm["sw_mid"].to_numpy() == pytest.approx(0.2**2, rel=0.01)  # a flat swap rate stays flat
-    # The simulated bars end days before snapshot + 30 days: the gap column says so.
+    # The simulated bars end days before snapshot + 30 days: the window is not covered, so there is no RV
+    # (and no premium) instead of an RV divided by the full 30 days.
     assert (t["rv_cm"]["end_gap_s"] > 20 * 86400).all()
+    assert t["rv_cm"]["rv_5m"].isna().all() and not t["rv_cm"]["complete_5m"].any()
+    assert t["vrp_cm"]["vrp_diff"].isna().all()
 
 
 def test_stage5_without_two_valid_expiries_has_no_constant_maturity(stage_inputs):
@@ -115,3 +118,34 @@ def test_dodo_stage5_task_lists_the_outputs():
     assert "python -m esvrp.stages 5" in task["actions"][0]
     assert {"data/strip.parquet", "data/rv.parquet", "data/vrp.parquet"} <= set(task["targets"])
     assert np.all([f.startswith(("data/", "reports/", "src/", "config/")) for f in task["file_dep"]])
+
+
+def test_stage5_leaves_out_chains_whose_window_the_bars_do_not_cover(stage_inputs):
+    data, reports = stage_inputs
+    chain = pd.read_parquet(data / "chain.parquet")
+    late = chain[chain["tau"] == chain["tau"].min()].copy()  # one chain per snapshot day
+    late["expiry"] = late["snapshot_ts"] + pd.Timedelta(days=30)  # the bars end on 2026-10-16
+    late["tau"] = 30 / 365
+    pd.concat([chain, late], ignore_index=True).to_parquet(data / "chain.parquet")
+    t = run(_cfg(), data, reports)
+    v = t["vrp"]
+    short = v[v["tau"] == 30 / 365]
+    assert len(short) == len(SNAPS) and short["rv"].isna().all() and short["vrp_diff"].isna().all()
+    assert v[v["tau"] != 30 / 365]["vrp_diff"].notna().all()
+    n_original = len(chain.drop_duplicates(["date", "expiry"]))
+    assert not t["rv"]["complete_5m"].all() and t["rv"]["complete_5m"].sum() == n_original
+    stats = pd.read_csv(reports / "tables" / "vrp_descriptives.csv", index_col=0)
+    assert stats.loc["vrp_diff", "n"] == len(v) - len(SNAPS)  # the left-out chains are not in the statistics
+
+
+def test_stage5_reads_the_new_config_keys(stage_inputs):
+    data, reports = stage_inputs
+    cfg = load_config()
+    assert cfg.realized.max_gap_days == 2 and cfg.strip.max_iv == 1.0 and cfg.strip.min_iv == 0.01
+    strict = dataclasses.replace(cfg, realized=dataclasses.replace(cfg.realized, max_gap_days=0.001))
+    strict = dataclasses.replace(strict, strip=dataclasses.replace(strict.strip, min_front_days=1))
+    t = run(strict, data, reports)
+    assert t["vrp"]["rv"].notna().all()  # windows end on bars, so even a tiny tolerance is met
+    with pytest.raises(Exception, match="max_gap_days"):
+        from esvrp.config import _validate_values
+        _validate_values(dataclasses.replace(cfg, realized=dataclasses.replace(cfg.realized, max_gap_days=0)))
