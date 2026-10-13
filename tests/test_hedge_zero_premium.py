@@ -2,12 +2,9 @@
 
 import numpy as np
 import pandas as pd
-import pytest
 
 from esvrp.hedging.simulator import delta_hedged_gain
 from esvrp.pricing.black76 import price
-
-pytestmark = pytest.mark.xfail(reason="not implemented", strict=False)
 
 F0, K, TAU, R = 5000.0, 5000.0, 30 / 365, 0.04
 

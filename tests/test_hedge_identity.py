@@ -2,12 +2,9 @@
 
 import numpy as np
 import pandas as pd
-import pytest
 
 from esvrp.hedging.simulator import delta_hedged_gain
 from esvrp.pricing.black76 import greeks, price
-
-pytestmark = pytest.mark.xfail(reason="not implemented", strict=False)
 
 
 def test_gain_matches_gamma_weighted_variance_gap(gbm_paths):
