@@ -43,6 +43,7 @@ class CleaningConfig:
     min_range_pct: float
     drop_zero_bid: bool
     drop_crossed: bool
+    backfill_minutes: int  # look-back for strikes with no quote at the snapshot minute (§6 stage 2)
 
 
 @dataclass(frozen=True)
