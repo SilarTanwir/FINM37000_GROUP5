@@ -3,7 +3,9 @@
 See `docs/PLANNING.md` §6 for inputs, outputs and the theory section (§4.2–4.4). Stage 5 combines the
 variance swap rate (roadmap 9), realized variance (roadmap 10) and the premium (roadmap 11).
 
-Status: roadmap 9 (strip) and roadmap 10 (realized variance) implemented and tested on simulated data; roadmap 11 pending. No real
+Status: roadmaps 9 (strip), 10 (realized variance) and 11 (VRP table, constant maturity, descriptives,
+plots) implemented and tested on simulated data. Not yet wired into `python -m esvrp.stages 5` and not yet
+run on real data (see the TODO at the end). No real
 data has been run through it yet.
 
 ## Variance-swap strip (`src/esvrp/vrp/strip.py`, roadmap 9)
@@ -86,4 +88,39 @@ Tests (`tests/test_realized_variance.py`, no data): convergence to sigma^2 on si
 `build_bars`, the snapshot-to-expiry window, daily skipping of days without a settlement, `rv_table`
 against a manual window, gap flags and missing contracts.
 
-TODO: the VRP table, plots and descriptives (roadmap 11).
+## VRP series and constant maturity (`src/esvrp/vrp/premium.py`, roadmap 11)
+
+- `vrp_table(strips, rv, kind, sw_col, rv_col)` joins `strip_table` and `rv_table` on (date, expiry) and
+  returns `sw`, `rv`, `vrp_diff` (`RV - SW`, primary, §15.6), `vrp_log` (`ln(RV/SW)`, reported alongside
+  for inference), `vrp_swap_return` (`RV/SW - 1`) and `vrp` (the one chosen by `kind`). The log and the
+  ratio are NaN unless SW and RV are positive. `sw_col` selects mid, bid or ask; `rv_col` selects 5-minute
+  or daily, log or simple.
+- `constant_maturity(strips, 30)` follows Carr-Wu Eq. (10): drop expiries under `min_front_days` (8),
+  take the pair that brackets the target and interpolate linearly in total variance
+  (`SW_T = [SW1 tau1 (tau2 - tau) + SW2 tau2 (tau - tau1)] / ((tau2 - tau1) tau)`). If no pair brackets the
+  target (for example every valid expiry is beyond 30 days, late in the month) the same formula
+  extrapolates from the two nearest expiries and `extrapolated` is set. A flat swap rate stays flat.
+- `constant_maturity_rv(cm, bars_5m, daily)`: RV over the 30 calendar days after the snapshot, on the
+  contract the first valid expiry is written on (decision; the two expiries can sit on different
+  contracts). Keyed by (date, expiry = snapshot + 30 days) so `vrp_table(cm, rv)` joins it.
+- `vrp_descriptives(vrp)`: n, mean, std, min, median, max, skew, excess kurtosis, share negative and a
+  **naive** t-statistic. It ignores the overlap between daily observations and overstates significance;
+  HAC and clustered errors belong to the inference module (roadmap 14).
+- Plots (`src/esvrp/reporting/figures.py`): `sw_vs_rv_figure` (SW and RV over time, 45-degree scatter),
+  `vrp_distribution_figure` (histogram and rolling mean), `rv_comparison_figure` (daily vs 5-minute RV).
+- `strip_table` now also carries `snapshot_ts`, which `constant_maturity` needs.
+
+Tests (`tests/test_premium.py`, no data): hand-computed premiums for all three kinds, variant selection,
+NaN handling, Eq. (10) by hand, flat variance preserved under interpolation and extrapolation, the 8-day
+rule, bracketing preference, skipped dates, constant-maturity RV against a manual window, descriptives and
+the figures (including empty input).
+
+## TODO: wire stage 5 and run it on real data
+
+Roadmaps 9-11 are infrastructure only so far. Still to do (roadmap 11 acceptance criteria):
+- Add a stage 5 `run(cfg)` that reads `data/chain.parquet`, `data/underlying_5m.parquet` and
+  `data/underlying_daily.parquet`, then writes `data/strip.parquet`, `data/rv.parquet`, `data/vrp.parquet`
+  (plus the constant-maturity tables), the descriptives table and the three figures.
+- Hook it into `python -m esvrp.stages 5` (`stages.py`) and check the `doit` task `vrp` targets.
+- Run it on the real chains (needs stages 1-4 run locally) and review the results, including the open
+  points in issue #32 (EW expiry time, thin underlying contracts) and the `iv_grid` comparison (#31).

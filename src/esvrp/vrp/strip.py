@@ -119,9 +119,9 @@ def variance_swap_rate(
 def strip_table(chain: pd.DataFrame, min_range_pct: float = 0.10) -> pd.DataFrame:
     """Run the strip on every chain (date, expiry) of `chain.parquet`; one row per chain.
 
-    Uses the chain's own `F`, `r` and `tau` (stage 4). Columns: date, expiry, underlying, tau, F, then
-    `sw_mid`, `sw_bid`, `sw_ask` and the diagnostics of the mid strip (k0, n_strikes, strike range,
-    truncation flag, widest strike gap, correction term).
+    Uses the chain's own `F`, `r` and `tau` (stage 4). Columns: date, expiry, underlying, tau, F,
+    snapshot_ts (if in the chain), then `sw_mid`, `sw_bid`, `sw_ask` and the diagnostics of the mid
+    strip (k0, n_strikes, strike range, truncation flag, widest strike gap, correction term).
     """
     rows = []
     for (date, expiry), g in chain.groupby(["date", "expiry"], sort=True):
@@ -130,6 +130,7 @@ def strip_table(chain: pd.DataFrame, min_range_pct: float = 0.10) -> pd.DataFram
         mid = res["mid"]
         rows.append({
             "date": date, "expiry": expiry, "underlying": g["underlying"].iloc[0], "tau": tau, "F": F,
+            "snapshot_ts": g["snapshot_ts"].iloc[0] if "snapshot_ts" in g else pd.NaT,
             "sw_mid": mid.sw, "sw_bid": res["bid"].sw, "sw_ask": res["ask"].sw, "k0": mid.k0,
             "n_strikes": mid.n_strikes, "strike_min": mid.strike_min, "strike_max": mid.strike_max,
             "truncation_flag": mid.truncation_flag, "max_strike_gap": mid.max_strike_gap,
