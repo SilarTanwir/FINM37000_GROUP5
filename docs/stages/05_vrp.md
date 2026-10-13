@@ -3,7 +3,7 @@
 See `docs/PLANNING.md` §6 for inputs, outputs and the theory section (§4.2–4.4). Stage 5 combines the
 variance swap rate (roadmap 9), realized variance (roadmap 10) and the premium (roadmap 11).
 
-Status: roadmap 9 (strip) implemented and tested on simulated chains; roadmaps 10 and 11 pending. No real
+Status: roadmap 9 (strip) and roadmap 10 (realized variance) implemented and tested on simulated data; roadmap 11 pending. No real
 data has been run through it yet.
 
 ## Variance-swap strip (`src/esvrp/vrp/strip.py`, roadmap 9)
@@ -54,4 +54,36 @@ Differences from the Cboe rules:
 Not yet implemented: the Carr-Wu `iv_grid` variant (§4.3, `strip.method`), jump and stale-quote
 diagnostics beyond `max_strike_gap`, and running on real chains.
 
-TODO: realized variance (roadmap 10) and the VRP table, plots and descriptives (roadmap 11).
+## Realized variance (`src/esvrp/vrp/realized.py`, roadmap 10)
+
+For each chain (one expiry on one day), `RV = (1/tau) * sum(r_i^2)` over the window from the snapshot
+(15:00 CT) to the option's expiry, on the futures contract the option is written on (`underlying`).
+`tau` is the chain's own ACT/365 time to expiry, the same `tau` the strip uses, so `RV` and `SW` are
+annualized on the same calendar-year basis (§4.2).
+
+- **5-minute:** closes of the traded bars of stage 3. The base is the last bar ending at or before the
+  snapshot; the last return ends at the last bar ending at or before the expiry (the contract keeps
+  trading after the option expires, so the window is cut there).
+- **Daily:** settlement to settlement. Base is the last settlement on or before the snapshot's trade
+  date, the end is the last settlement on or before the expiry's trade date. Days without a settlement
+  (shortened holiday sessions) are skipped.
+- **Gaps:** each return runs from one bar's close to the next, so the move across the maintenance halt,
+  a weekend or a holiday is one return spanning the gap (§15.3). The test checks that the returns
+  telescope to the log price move, which fails if any gap is dropped or counted twice.
+- **Variants:** `kind="log"` (baseline) or `"simple"` (Carr-Wu use simple returns).
+- `realized_variance(returns, tau)`, `returns_from_bars(bars, freq, session, start, end, underlying,
+  kind)` and `rv_table(chains, bars_5m, daily)`. `rv_table` returns one row per chain: `rv_5m`,
+  `rv_daily`, their `_simple` variants, `n_5m`, `n_daily`, and `start_gap_s` / `end_gap_s` (seconds from
+  the snapshot to the base bar and from the last bar to the expiry), which flag thin windows or an
+  expiry that does not match the bars.
+- `session` is validated here; the full-Globex / RTH filter is applied when the bars are built (stage 3).
+
+Open, to settle on the real data (issue #32): the actual expiry time of EW options, and thin underlying
+contracts (sparse or stale 5-minute bars).
+
+Tests (`tests/test_realized_variance.py`, no data): convergence to sigma^2 on simulated GBM at daily and
+5-minute sampling, log vs simple, the gap case (halt, weekend, Sunday reopen) through stage 3's
+`build_bars`, the snapshot-to-expiry window, daily skipping of days without a settlement, `rv_table`
+against a manual window, gap flags and missing contracts.
+
+TODO: the VRP table, plots and descriptives (roadmap 11).
