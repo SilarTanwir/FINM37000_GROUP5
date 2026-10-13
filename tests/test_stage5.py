@@ -1,6 +1,8 @@
 """Stage 5 end to end (roadmap 9-11 wiring): synthetic chains and bars in, tables and figures out."""
 
 import dataclasses
+import importlib.util
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -104,7 +106,10 @@ def test_stage5_is_wired_into_the_stage_runner(stage_inputs, monkeypatch):
 
 
 def test_dodo_stage5_task_lists_the_outputs():
-    import dodo
+    # Load dodo.py by path: the repo root is not on sys.path when CI runs plain `pytest`.
+    spec = importlib.util.spec_from_file_location("dodo", Path(__file__).resolve().parents[1] / "dodo.py")
+    dodo = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(dodo)
 
     task = dodo.task_vrp()
     assert "python -m esvrp.stages 5" in task["actions"][0]
