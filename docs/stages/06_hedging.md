@@ -66,6 +66,8 @@ One row per option, entry date and hedge delta. Entry columns from the chain (`i
 | `F_T` | Settlement of the futures contract on the expiry date |
 | `gain` | `Pi` in dollars ($50 per point), long side, entry at mid |
 | `gain_over_F`, `gain_over_option` | `Pi / F_0` and `Pi / O_0` (Bakshi-Kapadia) |
+| `gamma_dt` | `1/2 sum_n Gamma_n F_n^2 dt_n` (index points × years), with gamma at the hedge vol |
+| `var_gap` | `Pi / gamma_dt`: gamma-weighted realized minus implied variance, annualized. For one option it is biased up by about 0.0015 at daily hedging; sum gains and weights over options first (stage 7, H3) |
 | `halfspread` | Entry half-spread in index points: `(ask - bid) / 2` for `costs.option_halfspread: from_data`, else the configured number |
 | `cost` | Dollars, positive: half-spread, slippage and fees from `apply_costs` |
 

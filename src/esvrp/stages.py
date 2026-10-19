@@ -33,6 +33,10 @@ def run_stage(n: int) -> None:
         from esvrp.hedging.simulator import run
 
         run(cfg)
+    elif n == 7:
+        from esvrp.analysis.pipeline import run
+
+        run(cfg)
     else:
         raise NotImplementedError(f"stage {n} is not implemented yet")
 

@@ -45,6 +45,8 @@ class HedgeResult:
     gain_over_underlying: float
     gain_over_option: float
     n_hedges: int
+    gamma_dt: float = float("nan")  # 1/2 sum Gamma_n F_n^2 dt_n, index points x years
+    var_gap: float = float("nan")  # Pi / gamma_dt: gamma-weighted realized minus implied variance
 
 
 def delta_hedged_gain(
@@ -78,13 +80,15 @@ def delta_hedged_gain(
     if isinstance(hedge_vol, pd.Series) and isinstance(underlying_path.index, pd.DatetimeIndex):
         hedge_vol = hedge_vol.reindex(underlying_path.index[:n])
     sigmas = _hedge_sigmas(hedge_delta, hedge_vol, iv0, n)
-    pi = float(_gain_points(F, K, cp, taus, rate, sigmas, O0, tau0))
+    pi, gdt = (float(x) for x in _gain_points(F, K, cp, taus, rate, sigmas, O0, tau0))
 
     return HedgeResult(
         gain_dollars=pi * ES_MULTIPLIER,
         gain_over_underlying=pi / F[0],
         gain_over_option=pi / O0 if O0 > 0 else float("nan"),
         n_hedges=n,
+        gamma_dt=gdt,
+        var_gap=pi / gdt if gdt > 0 else float("nan"),
     )
 
 
@@ -124,12 +128,19 @@ def _hedge_sigmas(hedge_delta: str, hedge_vol: pd.Series | np.ndarray | None, iv
 
 
 def _gain_points(F: np.ndarray, K: float, cp: str, taus: np.ndarray, rate: float, sigmas: np.ndarray,
-                 O0: float, tau0: float) -> np.ndarray:
-    """Pi in index points for the path F_0..F_N; `sigmas` is (N,) or (variants, N), one Pi per row."""
+                 O0: float, tau0: float) -> tuple[np.ndarray, np.ndarray]:
+    """Pi in index points and the gamma weight 1/2 sum Gamma_n F_n^2 dt_n for the path F_0..F_N.
+
+    `sigmas` is (N,) or (variants, N), one result per row. Pi / weight is the gamma-weighted average of
+    realized minus implied variance (§4.5), annualized like RV - SW.
+    """
     n = len(F) - 1
-    deltas = np.asarray(greeks(F[:n], K, taus, rate, sigmas, cp)["delta"])
+    g = greeks(F[:n], K, taus, rate, sigmas, cp)
+    deltas, gammas = np.asarray(g["delta"]), np.asarray(g["gamma"])
+    dt = taus - np.append(taus[1:], 0.0)
     payoff = max(F[-1] - K, 0.0) if cp == "c" else max(K - F[-1], 0.0)
-    return payoff - math.exp(rate * tau0) * O0 - (deltas * np.diff(F)).sum(axis=-1)
+    pi = payoff - math.exp(rate * tau0) * O0 - (deltas * np.diff(F)).sum(axis=-1)
+    return pi, 0.5 * (gammas * F[:n] ** 2 * dt).sum(axis=-1)
 
 
 def _ffill(vols: np.ndarray, first: float) -> np.ndarray:
@@ -144,7 +155,7 @@ def _ffill(vols: np.ndarray, first: float) -> np.ndarray:
 ENTRY_COLUMNS = ["instrument_id", "raw_symbol", "underlying", "date", "snapshot_ts", "expiry", "cp",
                  "strike", "moneyness", "tau", "r", "F", "F_fut", "iv", "delta", "vega", "bid", "ask", "mid"]
 GAIN_COLUMNS = [*ENTRY_COLUMNS, "hedge_delta", "n_hedges", "F_T", "gain", "gain_over_F",
-                "gain_over_option", "halfspread", "cost"]
+                "gain_over_option", "gamma_dt", "var_gap", "halfspread", "cost"]
 
 
 def build_hedged_gains(
@@ -206,15 +217,15 @@ def build_hedged_gains(
         taus = opt.tau - (grid.ts[lo:hi] - entry_ns) / 1e9 / SECONDS_PER_YEAR
         F = np.append(grid.F[lo:hi], opt.F_T)
         sigmas = np.vstack([grid.hedge_vols(hd, opt.instrument_id, lo, hi, opt.iv) for hd in hedge_deltas])
-        pis = _gain_points(F, opt.strike, opt.cp, taus, opt.r, sigmas, opt.mid, opt.tau)
+        pis, gdts = _gain_points(F, opt.strike, opt.cp, taus, opt.r, sigmas, opt.mid, opt.tau)
 
         n = hi - lo
         halfspread = (opt.ask - opt.bid) / 2 if fixed_spread is None else fixed_spread
         cost = -apply_costs(0.0, halfspread, n, slippage_ticks, fee_per_contract)
         entry = [getattr(opt, c) for c in ENTRY_COLUMNS]
-        for hd, pi in zip(hedge_deltas, pis, strict=True):
+        for hd, pi, gdt in zip(hedge_deltas, pis, gdts, strict=True):
             rows.append([*entry, hd, n, opt.F_T, pi * ES_MULTIPLIER, pi / F[0], pi / opt.mid,
-                         halfspread, cost])
+                         gdt, pi / gdt if gdt > 0 else np.nan, halfspread, cost])
     return pd.DataFrame(rows, columns=GAIN_COLUMNS), pd.Series(dropped, name="dropped")
 
 
