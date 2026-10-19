@@ -59,7 +59,7 @@ def task_hedging():
     """Stage 6: delta-hedged gains per option."""
     return _stage(6, "hedging",
                   [f"{D}/chain.parquet", f"{D}/underlying_daily.parquet",
-                   "src/esvrp/hedging/simulator.py"],
+                   "src/esvrp/hedging/simulator.py", "src/esvrp/hedging/costs.py"],
                   [f"{D}/hedged_gains.parquet"], "Stage 6")
 
 

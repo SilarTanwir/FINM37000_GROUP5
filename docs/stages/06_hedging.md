@@ -1,10 +1,9 @@
 # Stage 6: hedging
 
 See `docs/PLANNING.md` §6 for inputs, outputs and the theory section (§4.5). Code:
-`src/esvrp/hedging/simulator.py` (hedged gains), `src/esvrp/hedging/costs.py` (costs, used in stage 7).
-
-The stage driver (`python -m esvrp.stages 6`, reading `data/chain.parquet` and
-`data/underlying_daily.parquet`) is not written yet; it waits for roadmap 8 to merge.
+`src/esvrp/hedging/simulator.py` (hedged gains and the stage driver), `src/esvrp/hedging/costs.py`
+(costs). Run with `doit hedging` or `python -m esvrp.stages 6` (needs `data/chain.parquet` from stage 4
+and `data/underlying_daily.parquet` from stage 3). No data is pulled.
 
 ## Hedged gain of one option
 
@@ -21,25 +20,67 @@ rebalance date:
 
 ## Hedge delta variants
 
-| `hedge_delta` | Volatility for Black-76 delta | `hedge_vol` |
+| `hedge_delta` | Volatility for Black-76 delta | In the stage driver |
 |---|---|---|
-| `iv_fixed` | Entry implied vol `option["iv"]` | not used |
-| `iv_daily` (baseline) | The option's own implied vol each day | the option's `iv` column from the chain |
-| `rv` | Trailing realized vol | `trailing_vol(F_daily, 21)`, a 21-day rolling std (Bakshi-Kapadia's alternative to GARCH) |
+| `iv_fixed` | Entry implied vol | the entry quote's `iv` |
+| `iv_daily` (baseline) | The option's own implied vol each day | the option's `iv` in each day's chain |
+| `rv` | Trailing realized vol (Bakshi-Kapadia's rolling alternative to GARCH) | 21-day settlement-to-settlement vol of the option's own contract, through the previous trade date |
 
-`hedge_vol` is matched to the path by date. Missing values (e.g. a day with no two-sided quote) carry
-the last known vol forward, starting from the entry implied vol.
+Missing values (a day with no two-sided quote, the first weeks of a contract's history) carry the last
+known vol forward, starting from the entry implied vol. The `rv` vol is lagged a day because a day's
+settlement is published after the 15:00 CT snapshot it would hedge.
 
-## Normalizations
+## Stage driver: `build_hedged_gains`
 
-`HedgeResult` reports `Pi` in dollars ($50 per point), `Pi / F_0` and `Pi / O_0` (Bakshi-Kapadia).
+The daily-start cross-section used for inference (§6): every option on every snapshot date that passes
+the entry rules, hedged to expiry once per hedge delta.
+
+**Entries.** `|moneyness| <= hedging.moneyness_max` (10%), 14 to 60 days to expiry (the first and last
+`hedging.maturity_buckets_days`), and a two-sided quote with an implied vol. Bought at the chain's `mid`.
+
+**Futures path.** `F_fut`, the option's own futures contract at the 15:00 CT snapshot, on every snapshot
+date from entry until before expiry. Not the chain's `F`: that is the parity forward used to compute `iv`,
+while the hedge trades the futures contract itself. The two differ by about 1 point at the median
+(`docs/stages/04_chain.md`). A day on which the contract has no futures price is skipped, which just
+lengthens one hedge interval.
+
+**Expiry.** EW options expire at 15:00 CT on the last business day of the month. The option pays
+intrinsic value at its futures contract's **settlement on the expiry date** (stage 3 `settle`), taken as
+the price EW options are exercised against (open item 9 in `docs/data.md`). Expiring options are not in
+that day's chain (stage 2 excludes options at or past expiry), so this is the only price for the last
+step.
+
+**Drops** (returned with the gains and logged): `one_sided` and `no_iv` (no entry mid or implied vol),
+`expires_after_sample` (expiry after the last chain date) and `no_expiry_settle`.
+
+### Output: `data/hedged_gains.parquet`
+
+One row per option, entry date and hedge delta. Entry columns from the chain (`instrument_id`,
+`raw_symbol`, `underlying`, `date`, `snapshot_ts`, `expiry`, `cp`, `strike`, `moneyness`, `tau`, `r`, `F`,
+`F_fut`, `iv`, `delta`, `vega`, `bid`, `ask`, `mid`), plus:
+
+| Column | Meaning |
+|---|---|
+| `hedge_delta` | `iv_daily`, `iv_fixed` or `rv`; `hedging.hedge_delta` picks the baseline |
+| `n_hedges` | Rebalance dates from entry to expiry |
+| `F_T` | Settlement of the futures contract on the expiry date |
+| `gain` | `Pi` in dollars ($50 per point), long side, entry at mid |
+| `gain_over_F`, `gain_over_option` | `Pi / F_0` and `Pi / O_0` (Bakshi-Kapadia) |
+| `halfspread` | Entry half-spread in index points: `(ask - bid) / 2` for `costs.option_halfspread: from_data`, else the configured number |
+| `cost` | Dollars, positive: half-spread, slippage and fees from `apply_costs` |
+
+Net gains are `gain - cost` for a buyer and `-gain - cost` for a seller; costs do not depend on the side.
+Entry `vega` is kept for the per-unit-vega returns of the strategy (§4.7).
+
+**Speed.** About 0.85 ms per entry for all three hedge deltas (one Black-76 call per entry), so a few
+minutes for the full sample.
 
 ## Costs
 
-`entry_price` picks `mid`, `ask` or `bid` for `O_0`. Use `mid` together with `apply_costs`, or `ask`/`bid`
-without the option half-spread there, so the spread is not charged twice. `apply_costs` charges the
-half-spread once (held to expiry, no exit spread), 0.5 tick ($6.25) of slippage per rebalance and
-$1.50 per contract on the option and on each hedge trade.
+`apply_costs` charges the half-spread once (held to expiry, no exit spread), 0.5 tick ($6.25) of
+slippage per rebalance and $1.50 per contract on the option and on each hedge trade. When calling
+`delta_hedged_gain` directly, use `entry_price="mid"` with `apply_costs`, or `"ask"`/`"bid"` without
+the option half-spread there, so the spread is not charged twice.
 
 ## Checks
 
@@ -49,7 +90,14 @@ $1.50 per contract on the option and on each hedge trade.
 - `test_hedge_identity`: gains co-move with the gamma-weighted realized-minus-implied variance.
 - `test_hedge_simulator`: exact values on short paths, calendar-time `tau`, put-call parity of hedged
   gains, and the three hedge-delta variants.
+- `test_hedged_gains`: on a synthetic month of chains, the driver matches `delta_hedged_gain` on the
+  `F_fut` path with the expiry settlement; entry filters and drop counts; `iv_daily` follows the option's
+  own implied vol; the `rv` vol never uses that day's settlement; the stage writes the parquet file.
+
+Not yet run on real data: `data/chain.parquet` is not built in this checkout.
 
 ## Known limitations
 
 - Slippage assumes one futures contract per rebalance, whatever the change in delta.
+- The `rv` hedge vol has no history for the first month of the sample or of a contract's settlements,
+  and falls back to the entry implied vol there.

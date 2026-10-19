@@ -29,6 +29,10 @@ def run_stage(n: int) -> None:
         from esvrp.pricing.chain import run
 
         run(cfg)
+    elif n == 6:
+        from esvrp.hedging.simulator import run
+
+        run(cfg)
     else:
         raise NotImplementedError(f"stage {n} is not implemented yet")
 

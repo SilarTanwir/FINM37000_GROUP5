@@ -12,6 +12,7 @@ decisions in §15. Each has a `TODO` comment at the point of use in the code.
 | # | Type | Item | Plan § | Where in code |
 |---|---|---|---|---|
 | 8 | DECISION | Budget semantics on the program's Plus plan: what Databento's cost estimate means when data is covered by the subscription, and whether `data.budget_usd` is per pull or cumulative. `fetch` currently treats it as a per-pull hard stop. **Evidence (Oct 9, Alex's key):** estimates are plan-aware: EW.OPT `definition` and `bbo-1m` for the full Oct 2023–Sep 2026 sample are $0.00; ES.FUT `mbp-10` from Jan 2024 is $1.20 (outside the plan's book-depth history); non-CME data is charged. Proposed: keep the per-pull hard stop as a guard against uncovered pulls, and close this item. | 5.4 | `data/client.py`, `config/default.yaml` |
+| 9 | VERIFY | Expiry price of EW options. Stage 6 pays each option intrinsic value at its futures contract's daily settlement on the expiry date, assuming EW options (expiring 15:00 CT on the last business day) are exercised against that 15:00 CT price. Check against the CME contract specs; if exercise uses a different reference, `F_T` in `build_hedged_gains` changes. | 4.5 | `hedging/simulator.py` |
 
 ## Resolved since the first draft
 
