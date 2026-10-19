@@ -274,7 +274,8 @@ es-vrp/
 │   │   └── rates.py             # risk-free rate (FRED or constant)
 │   ├── pricing/
 │   │   ├── black76.py           # price, greeks, implied vol
-│   │   └── forward.py           # parity-implied forward
+│   │   ├── forward.py           # parity-implied forward
+│   │   └── chain.py             # chain assembly: forward, τ, mid, IV, Greeks, moneyness
 │   ├── vrp/
 │   │   ├── strip.py             # variance-swap strip + diagnostics
 │   │   ├── realized.py          # RV (daily / intraday)
