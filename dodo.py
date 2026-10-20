@@ -43,8 +43,10 @@ def task_chain():
     return _stage(4, "chain",
                   [f"{D}/quotes.parquet", f"{D}/underlying_daily.parquet",
                    "src/esvrp/pricing/black76.py", "src/esvrp/pricing/forward.py",
-                   "src/esvrp/pricing/chain.py", "src/esvrp/data/rates.py"],
-                  [f"{D}/chain.parquet", f"{R}/figures/forward_gap.png"], "Stage 4")
+                   "src/esvrp/pricing/chain.py", "src/esvrp/data/rates.py", "src/esvrp/data/quality.py"],
+                  [f"{D}/chain.parquet", f"{D}/chain_quality.parquet", f"{R}/figures/forward_gap.png",
+                   f"{R}/figures/chain_quality.png", f"{R}/tables/chain_quality_summary.csv",
+                   f"{R}/tables/quote_age_by_day.csv"], "Stage 4")
 
 
 def task_vrp():

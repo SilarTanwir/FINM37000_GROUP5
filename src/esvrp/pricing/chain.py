@@ -17,6 +17,7 @@ import numpy as np
 import pandas as pd
 
 from esvrp.data.client import DATA_DIR, REPO_ROOT
+from esvrp.data.quality import REASONS, apply_quality, chain_quality, quote_age_by_day, reason_summary
 from esvrp.data.rates import risk_free_rate
 from esvrp.pricing.black76 import greeks, implied_vols
 from esvrp.pricing.forward import parity_forward
@@ -24,6 +25,8 @@ from esvrp.pricing.forward import parity_forward
 log = logging.getLogger(__name__)
 
 FIGURE_PATH = REPO_ROOT / "reports" / "figures" / "forward_gap.png"
+QUALITY_FIGURE_PATH = REPO_ROOT / "reports" / "figures" / "chain_quality.png"
+TABLE_DIR = REPO_ROOT / "reports" / "tables"
 
 CHAIN_COLUMNS = ["tau", "r", "mid", "F_fut", "F_parity", "F", "forward_gap", "settle", "moneyness",
                  "iv", "delta", "gamma", "vega"]
@@ -73,10 +76,26 @@ def forward_gap_table(chain: pd.DataFrame) -> pd.DataFrame:
 
 
 def run(cfg: Any) -> pd.DataFrame:
-    """Stage 4 entry point: `data/chain.parquet` and the forward-gap diagnostic figure."""
-    from esvrp.reporting.figures import forward_gap_figure
+    """Stage 4 entry point: chain-quality table, `data/chain.parquet` and the diagnostic figures.
+
+    Every chain is assessed first (`data.quality`): `data/chain_quality.parquet` keeps the diagnostics and
+    the reasons, and with `quality.action: reject` the failing chains are left out of the chain.
+    """
+    from esvrp.reporting.figures import chain_quality_figure, forward_gap_figure
 
     quotes = pd.read_parquet(DATA_DIR / "quotes.parquet")
+    quality = chain_quality(quotes, cfg.quality)
+    quality.to_parquet(DATA_DIR / "chain_quality.parquet")
+    TABLE_DIR.mkdir(parents=True, exist_ok=True)
+    reason_summary(quality).to_csv(TABLE_DIR / "chain_quality_summary.csv", index=False)
+    ages = quote_age_by_day(quotes, cfg.quality.max_quote_age_s)
+    ages.to_csv(TABLE_DIR / "quote_age_by_day.csv", index=False)
+    chain_quality_figure(quality, QUALITY_FIGURE_PATH)
+    summary = reason_summary(quality).set_index("rule")["chains"]
+    log.info("Chain quality: %d chains, %d failing a rule (%d rejected); by rule %s",
+             summary["chains"], summary["failing"], summary["rejected"],
+             {r: int(summary[r]) for r in REASONS if summary[r]})
+    quotes = apply_quality(quotes, quality)
     daily = pd.read_parquet(DATA_DIR / "underlying_daily.parquet")
     dates = pd.Index(sorted(quotes["date"].unique()))
     r = risk_free_rate(dates, cfg.pricing.rate_source, cfg.pricing.rate_constant)
