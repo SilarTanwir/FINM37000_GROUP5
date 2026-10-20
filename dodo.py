@@ -12,8 +12,8 @@ R = "reports"
 
 
 def _stage(n, name, file_dep, targets, doc):
+    # doit names each task after its task_* function; a "name" key is only valid for subtasks.
     return {
-        "name": name,
         "actions": [f"python -m esvrp.stages {n}"],
         "file_dep": [CFG, *file_dep],
         "targets": targets,
