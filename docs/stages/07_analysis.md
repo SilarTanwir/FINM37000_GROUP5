@@ -18,6 +18,7 @@ The moneyness × maturity × regime table (roadmap 14, `reports/tables/summary.c
 | `reports/tables/strategy.csv` | Risk metrics of the monthly short straddle: per unit vega, dollars and return on margin, each gross and net |
 | `reports/tables/strategy_trades.csv` | One row per monthly trade |
 | `reports/tables/strategy_structures.csv` | The baseline straddle next to strangles at 3%, 5% and 7% out of the money (robustness) |
+| `reports/tables/strategy_margin.csv` | Return on margin at 6%, 8% and 10% of the two legs' notional (sensitivity) |
 | `reports/tables/strategy_worst_months.csv` | The worst trades, with the market move and the implied vol sold |
 | `reports/figures/h3.png` | VRP against the hedged gain (planned output 5) |
 | `reports/figures/strategy.png` | Cumulative gross and net P&L, and each month's net P&L (planned output 6) |
@@ -117,6 +118,23 @@ market `move` (`F_T / F - 1`, settlement over the entry forward) and the entry i
 A short option position loses when the futures finish far from where they started, more than the premium
 collected, so the table shows which months were a large move against a low implied vol and which were just
 costs. P&L is only measured at expiry, so this is a table of months, not of days.
+
+### Sensitivity to the margin assumption
+
+The margin fraction (10% of the two legs' futures notional) is an assumption (§4.7) and only enters the
+secondary return-on-margin series; the dollar P&L and the per-vega results do not use it. `margin_sensitivity`
+reruns that series at 6%, 8% and 10% (`strategy_margin.csv`). With one fraction for every trade the series
+is just rescaled by 1/fraction, so **the mean, worst month, CVaR and drawdown move in proportion, while the
+t-statistics, the Sharpe ratio and the skew do not change.** What the table adds is how much of the margin
+the worst month and the maximum drawdown use (a drawdown of -0.5 means half the margin was lost), which is
+where a margin call becomes a risk.
+
+For scale, ES futures initial margin for December 2026 read off the CME margins page (by the team; the page
+blocks automated access): $26,121 long and $23,290 short per contract at a price of 7,729.75, a notional of
+$386,487.50, so 6.8% and 6.0% of one contract's notional. 6% of the two legs' notional ($46,380) is about
+two short futures margins, 8% about 2.7 and 10% about 3.3. A short straddle probably needs about one to two
+futures margins (an inference; SPAN margins the worst one-day loss of the whole position), so the three
+fractions are on the conservative side. Rates change with volatility, so record the date with the figures.
 
 Not covered: worst day (P&L is only measured at expiry, not marked daily), and option spreads by moneyness bucket from the `mbp-1` sample (roadmap 13); the entry half-spread is
 taken from each quote's own bid and ask.

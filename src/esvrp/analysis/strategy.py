@@ -225,3 +225,32 @@ def run_structures(hedged_gains: pd.DataFrame, hedge_delta: str = "iv_daily", ma
             "net_cvar": net.get(cvar, np.nan) if cvar else np.nan,
         }
     return pd.DataFrame(rows).T
+
+
+def margin_sensitivity(trades: pd.DataFrame, fractions: tuple[float, ...] = (0.06, 0.08, 0.10),
+                       cvar_level: float = 0.05) -> pd.DataFrame:
+    """Return on margin at several margin fractions, one row per fraction.
+
+    The margin base of a trade is `fraction x 2 legs x F x $50` (an assumption, §4.7). With one fraction
+    for every trade, the return on margin is the dollar P&L divided by a number that scales with F, so a
+    different fraction rescales the whole series by 1/fraction: the mean, the worst month, the drawdown and
+    the CVaR move in proportion, while the t-statistics, the Sharpe ratio and the skew do not change at
+    all (to the extent F is similar across trades). The informative columns are therefore the loss
+    measures: `max_drawdown` and `worst` are shares of margin, so a value of -0.5 means half the margin
+    was lost, which is where a margin call becomes a real risk. `margin_usd` is the average margin base
+    per straddle in dollars.
+    """
+    rows = {}
+    for f in fractions:
+        if trades.empty:
+            rows[f"{f:.0%}"] = {"fraction": f, "n": 0}
+            continue
+        margin = f * 2 * trades["F"] * ES_MULTIPLIER
+        m = risk_metrics(trades["net"] / margin, cvar_level=cvar_level)
+        cvar = next((k for k in m if str(k).startswith("cvar_")), None)
+        rows[f"{f:.0%}"] = {
+            "fraction": f, "margin_usd": float(margin.mean()), "n": m["n"], "mean_monthly": m["mean"],
+            "annualized": m["mean"] * 12, "t_hac": m["t_hac"], "sharpe": m["sharpe"], "skew": m["skew"],
+            "worst": m["worst"], "cvar": m[cvar] if cvar else float("nan"), "max_drawdown": m["max_drawdown"],
+        }
+    return pd.DataFrame(rows).T

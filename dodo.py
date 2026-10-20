@@ -73,6 +73,7 @@ def task_analysis():
                   # summary.csv is the bucket table of roadmap 14, not written yet.
                   [f"{R}/tables/summary.csv", f"{R}/tables/h3.csv", f"{R}/tables/strategy.csv",
                    f"{R}/tables/strategy_structures.csv", f"{R}/tables/strategy_worst_months.csv",
+                   f"{R}/tables/strategy_margin.csv",
                    f"{D}/h3.parquet"], "Stage 7")
 
 

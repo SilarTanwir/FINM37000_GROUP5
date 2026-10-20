@@ -5,6 +5,7 @@ import pandas as pd
 import pytest
 
 from esvrp.analysis.strategy import (
+    margin_sensitivity,
     monthly_straddles,
     monthly_trades,
     risk_metrics,
@@ -209,3 +210,42 @@ def test_worst_months_lists_the_losers_with_the_move_and_the_implied_vol():
     empty = worst_months(trades.iloc[:0])
     assert empty.empty and list(empty.columns) == list(w.columns)
     assert worst_months(trades, col="not_a_column").empty
+
+
+# --- margin sensitivity ----------------------------------------------------------------------------------
+
+def _trades_with_pnl(net, F=5000.0):
+    return pd.DataFrame({"F": F, "net": net, "gross": net})
+
+
+def test_margin_fraction_rescales_levels_but_not_the_ratios():
+    trades = _trades_with_pnl([800.0, 600.0, -1500.0, 400.0, 700.0, -3000.0, 500.0, 900.0])
+    s = margin_sensitivity(trades, fractions=(0.06, 0.10))
+    lo, hi = s.loc["6%"], s.loc["10%"]
+    assert lo["margin_usd"] == pytest.approx(0.06 * 2 * 5000.0 * 50)
+    for level in ("mean_monthly", "annualized", "worst", "cvar", "max_drawdown"):
+        # a smaller margin magnifies returns and losses in proportion
+        assert lo[level] / hi[level] == pytest.approx(0.10 / 0.06)
+    for ratio in ("t_hac", "sharpe", "skew"):
+        assert lo[ratio] == pytest.approx(hi[ratio])  # unchanged by the fraction
+    assert lo["annualized"] == pytest.approx(12 * lo["mean_monthly"]) and lo["n"] == 8
+
+
+def test_margin_sensitivity_matches_the_trade_table_at_its_own_fraction():
+    g = pd.concat([chain_legs(SEP, "2026-09-01"), chain_legs(OCT, "2026-10-01", F=5140.0)], ignore_index=True)
+    res = run_strategy(g, margin_fraction=0.10)
+    s = margin_sensitivity(res.trades, fractions=(0.10,))
+    assert s.loc["10%", "mean_monthly"] == pytest.approx(res.metrics.loc["net_return", "mean"])
+    assert s.loc["10%", "worst"] == pytest.approx(res.metrics.loc["net_return", "worst"])
+
+
+def test_margin_sensitivity_shows_how_much_of_the_margin_a_drawdown_uses():
+    trades = _trades_with_pnl([-12000.0, 3000.0, -9000.0])  # margin at 6% is $30,000
+    s = margin_sensitivity(trades, fractions=(0.06, 0.10))
+    assert s.loc["6%", "max_drawdown"] == pytest.approx(-18000.0 / 30000.0)  # peak 0 down to -18,000
+    assert s.loc["10%", "max_drawdown"] == pytest.approx(-18000.0 / 50000.0)
+
+
+def test_margin_sensitivity_with_no_trades():
+    s = margin_sensitivity(pd.DataFrame(columns=["F", "net"]))
+    assert list(s.index) == ["6%", "8%", "10%"] and (s["n"] == 0).all()
