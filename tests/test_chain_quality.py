@@ -103,6 +103,21 @@ def test_summaries_count_reasons_and_age_by_day():
     assert abs(by_day["stale_share"] - 6 / 20) < 1e-12
 
 
+def test_empty_input_gives_empty_table_with_full_schema():
+    quality = chain_quality(chain().iloc[0:0], CFG)
+    assert quality.empty and {"reasons", "status", "fail_few_calls", "sync_measured"} <= set(quality.columns)
+    assert reason_summary(quality).set_index("rule")["chains"]["chains"] == 0
+    assert apply_quality(chain().iloc[0:0], quality).empty
+
+
+def test_partial_futures_age_and_row_order():
+    q = pd.concat([chain("2026-10-30", f_age=0.0), chain("2026-11-30", f_age=900.0, age=900.0)])
+    shuffled = q.sample(frac=1, random_state=1)
+    a, b = chain_quality(q, CFG), chain_quality(shuffled, CFG)
+    assert a.reset_index(drop=True).equals(b.reset_index(drop=True))  # row order does not matter
+    assert list(a["status"]) == ["ok", "flag"]
+
+
 def test_default_config_has_quality_section():
     q = load_config().quality
     assert q.action in {"flag", "reject"} and q.min_strikes >= q.min_calls > 0

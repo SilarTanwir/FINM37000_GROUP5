@@ -25,6 +25,11 @@ import pandas as pd
 log = logging.getLogger(__name__)
 
 KEYS = ["date", "expiry"]
+COLUMNS = ["date", "expiry", "underlying", "F", "n_quotes", "n_calls", "n_puts", "n_strikes", "n_both_sides",
+           "strike_min", "strike_max", "log_range_lo", "log_range_hi", "age_median", "age_p90", "age_max",
+           "stale_share", "F_age_s", "sync_gap_s"]
+FLOAT_COLUMNS = ["F", "strike_min", "strike_max", "log_range_lo", "log_range_hi", "age_median", "age_p90",
+                 "age_max", "stale_share", "F_age_s", "sync_gap_s"]
 REASONS = ["few_calls", "few_puts", "few_strikes", "narrow_range", "stale_quotes", "stale_futures",
            "unsynchronized"]
 
@@ -75,11 +80,9 @@ def chain_quality(quotes: pd.DataFrame, cfg: Any) -> pd.DataFrame:
             "sync_gap_s": g["sync_gap"].median() if has_sync else np.nan,
         }
         rows.append(row)
-    out = pd.DataFrame(rows)
-    if out.empty:
-        return out.assign(sync_measured=pd.Series(dtype=bool), reasons=pd.Series(dtype=str),
-                          status=pd.Series(dtype=str))
+    out = pd.DataFrame(rows, columns=COLUMNS)  # fixed columns, so an empty input still has the full schema
 
+    out = out.astype(dict.fromkeys(FLOAT_COLUMNS, float))
     out["sync_measured"] = out["F_age_s"].notna()
     fails = {
         "few_calls": out["n_calls"] < cfg.min_calls,
