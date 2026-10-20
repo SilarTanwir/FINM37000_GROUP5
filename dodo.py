@@ -72,6 +72,7 @@ def task_analysis():
                    "src/esvrp/analysis/pipeline.py", "src/esvrp/reporting/figures.py"],
                   # summary.csv is the bucket table of roadmap 14, not written yet.
                   [f"{R}/tables/summary.csv", f"{R}/tables/h3.csv", f"{R}/tables/strategy.csv",
+                   f"{R}/tables/strategy_structures.csv", f"{R}/tables/strategy_worst_months.csv",
                    f"{D}/h3.parquet"], "Stage 7")
 
 

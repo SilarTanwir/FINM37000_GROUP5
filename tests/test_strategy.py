@@ -4,7 +4,14 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from esvrp.analysis.strategy import monthly_straddles, risk_metrics, run_strategy
+from esvrp.analysis.strategy import (
+    monthly_straddles,
+    monthly_trades,
+    risk_metrics,
+    run_strategy,
+    run_structures,
+    worst_months,
+)
 
 SEP = pd.Timestamp("2026-09-30 20:00", tz="UTC")  # 15:00 CT
 OCT = pd.Timestamp("2026-10-30 19:00", tz="UTC")
@@ -91,3 +98,114 @@ def test_run_strategy_reports_gross_and_net_series():
     assert series == set(res.metrics.index)
     assert res.metrics.loc["net", "mean"] == pytest.approx((-280.0 + 420.0) / 2)
     assert res.metrics.loc["net_per_vega", "units"] == "vol points"
+
+
+# --- strangle as a robustness check, and the worst months ---------------------------------------------------
+
+def leg2(date, expiry, strike, cp, gain, F=5000.0, vega=150.0, cost=30.0, iv=0.18, F_T=5100.0, hd="iv_daily"):
+    row = leg(date, expiry, strike, cp, gain, F=F, vega=vega, cost=cost, iv=iv, hd=hd)
+    return {**row, "F_T": F_T}
+
+
+def chain_legs(expiry=SEP, date="2026-09-01", F=5000.0, F_T=5100.0, gains_by_strike=None, strikes=None):
+    """Calls and puts at several strikes; ATM legs have more vega than the wings."""
+    strikes = strikes or (4500.0, 4750.0, 4900.0, 5000.0, 5100.0, 5250.0, 5500.0)
+    rows = []
+    for k in strikes:
+        for cp in ("c", "p"):
+            gain = (gains_by_strike or {}).get((k, cp), 10.0)
+            rows.append(leg2(date, expiry, k, cp, gain, F=F, F_T=F_T, vega=300.0 if k == F else 120.0))
+    return pd.DataFrame(rows)
+
+
+def test_strangle_sells_the_otm_call_and_put_nearest_five_percent():
+    g = chain_legs(gains_by_strike={(5250.0, "c"): -40.0, (4750.0, "p"): 15.0})
+    t = monthly_trades(g, "strangle")
+    assert len(t) == 1
+    r = t.iloc[0]
+    assert (r["strike_call"], r["strike_put"]) == (5250.0, 4750.0)  # ln(1.05) and ln(0.95) are the targets
+    assert r["structure"] == "strangle" and np.isnan(r["strike"]) and np.isnan(r["moneyness"])
+    assert r["moneyness_call"] == pytest.approx(np.log(5250 / 5000)) and r["moneyness_put"] < 0
+    assert r["gross"] == pytest.approx(-(-40.0 + 15.0))  # the seller earns minus the long gains
+    assert r["cost"] == pytest.approx(60.0) and r["net"] == pytest.approx(25.0 - 60.0)
+    assert r["vega"] == pytest.approx(240.0 * 50 * 0.01)
+    assert r["net_per_vega"] == pytest.approx(r["net"] / r["vega"])
+    assert r["margin"] == pytest.approx(0.10 * 2 * 5000.0 * 50)  # same assumed margin base as the straddle
+    assert r["F_T"] == 5100.0 and r["move"] == pytest.approx(0.02)
+
+
+def test_otm_distance_changes_the_strikes_and_the_atm_leg_is_never_used():
+    g = chain_legs()
+    near = monthly_trades(g, "strangle", otm=0.02).iloc[0]
+    far = monthly_trades(g, "strangle", otm=0.10).iloc[0]
+    assert (near["strike_call"], near["strike_put"]) == (5100.0, 4900.0)
+    assert (far["strike_call"], far["strike_put"]) == (5500.0, 4500.0)
+    assert near["strike_call"] > 5000.0 > near["strike_put"]  # strictly out of the money
+
+
+def test_strangle_needs_legs_close_to_the_target_and_on_both_sides():
+    sparse = chain_legs(strikes=(4950.0, 5000.0, 5050.0, 5500.0))  # nothing near +/-5% except 5500 (+9.5%)
+    assert monthly_trades(sparse, "strangle").empty
+    loose = monthly_trades(sparse, "strangle", tolerance=0.06)  # a looser tolerance accepts the nearest legs
+    assert len(loose) == 1 and (loose.iloc[0]["strike_call"], loose.iloc[0]["strike_put"]) == (5050.0, 4950.0)
+    only_calls = chain_legs()
+    only_calls = only_calls[~((only_calls["cp"] == "p") & (only_calls["strike"] < 5000.0))]
+    assert monthly_trades(only_calls, "strangle").empty
+
+
+def test_straddle_columns_in_the_general_function():
+    r = monthly_trades(chain_legs(), "straddle").iloc[0]
+    assert r["structure"] == "straddle" and r["strike"] == r["strike_call"] == r["strike_put"] == 5000.0
+    assert r["moneyness"] == pytest.approx(0.0) and r["vega"] == pytest.approx(600.0 * 50 * 0.01)
+    assert monthly_trades(chain_legs()).equals(monthly_straddles(chain_legs()))
+
+
+def test_unknown_structure_is_rejected_and_empty_input_gives_empty_trades():
+    with pytest.raises(ValueError):
+        monthly_trades(chain_legs(), "butterfly")
+    assert monthly_trades(pd.DataFrame(columns=["hedge_delta"]), "strangle").empty
+
+
+def test_run_structures_puts_the_straddle_next_to_strangles():
+    lossy = {(5000.0, "c"): -100.0, (5000.0, "p"): -100.0}
+    g = pd.concat([chain_legs(SEP, "2026-09-01", gains_by_strike=lossy),
+                   chain_legs(OCT, "2026-10-01", F_T=4800.0)], ignore_index=True)
+    s = run_structures(g, otms=(0.05, 0.02))
+    assert list(s.index) == ["straddle (ATM)", "strangle (5% OTM)", "strangle (2% OTM)"]
+    assert (s["n"] == 2).all()
+    base = run_strategy(g)
+    assert s.loc["straddle (ATM)", "net_mean"] == pytest.approx(base.metrics.loc["net_per_vega", "mean"])
+    # The wings carry less vega, so the strangle is a smaller position in vega terms.
+    assert s.loc["strangle (5% OTM)", "mean_vega_collected"] < s.loc["straddle (ATM)", "mean_vega_collected"]
+    assert {"net_t_hac", "net_sharpe", "net_skew", "net_worst", "net_cvar"} <= set(s.columns)
+
+
+def test_run_strategy_can_run_the_strangle_and_returns_the_worst_months():
+    g = pd.concat([chain_legs(SEP, "2026-09-01", gains_by_strike={(5250.0, "c"): 500.0}),
+                   chain_legs(OCT, "2026-10-01", F_T=4600.0)], ignore_index=True)
+    res = run_strategy(g, structure="strangle", n_worst=1)
+    assert len(res.trades) == 2 and (res.trades["structure"] == "strangle").all()
+    assert len(res.worst) == 1 and res.worst.iloc[0]["rank"] == 1
+    assert res.worst.iloc[0]["net_per_vega"] == res.trades["net_per_vega"].min()
+
+
+def test_worst_months_lists_the_losers_with_the_move_and_the_implied_vol():
+    trades = pd.DataFrame({
+        "date": pd.to_datetime(["2026-03-02", "2026-04-01", "2026-05-01", "2026-06-01"]).date,
+        "expiry": pd.to_datetime(["2026-03-31", "2026-04-30", "2026-05-29", "2026-06-30"]),
+        "structure": "straddle", "net_per_vega": [1.0, -9.0, -2.0, 0.5], "net": [10.0, -90.0, -20.0, 5.0],
+        "gross": [20.0, -70.0, -5.0, 15.0], "cost": [10.0, 20.0, 15.0, 10.0],
+        "move": [0.01, -0.08, 0.03, 0.0], "iv_call": [0.14, 0.15, 0.16, 0.13],
+        "iv_put": [0.16, 0.17, 0.16, 0.15],
+        "days": [29.0, 29.0, 28.0, 29.0],
+    })
+    w = worst_months(trades, n=2)
+    assert list(w["rank"]) == [1, 2] and list(w["net_per_vega"]) == [-9.0, -2.0]
+    assert list(w["move"]) == [-0.08, 0.03] and w["iv_entry"].tolist() == pytest.approx([0.16, 0.16])
+    assert list(w.columns) == ["rank", "date", "expiry", "structure", "net_per_vega", "net", "gross", "cost",
+                               "move", "iv_entry", "days"]
+    assert list(worst_months(trades, n=1, col="net")["net"]) == [-90.0]
+    assert len(worst_months(trades, n=10)) == 4  # fewer trades than asked for
+    empty = worst_months(trades.iloc[:0])
+    assert empty.empty and list(empty.columns) == list(w.columns)
+    assert worst_months(trades, col="not_a_column").empty

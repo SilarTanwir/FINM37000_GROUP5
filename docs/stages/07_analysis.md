@@ -17,6 +17,8 @@ The moneyness × maturity × regime table (roadmap 14, `reports/tables/summary.c
 | `reports/tables/h3.csv` | H3 statistics for every chain and for the non-overlapping monthly subsample |
 | `reports/tables/strategy.csv` | Risk metrics of the monthly short straddle: per unit vega, dollars and return on margin, each gross and net |
 | `reports/tables/strategy_trades.csv` | One row per monthly trade |
+| `reports/tables/strategy_structures.csv` | The baseline straddle next to strangles at 3%, 5% and 7% out of the money (robustness) |
+| `reports/tables/strategy_worst_months.csv` | The worst trades, with the market move and the implied vol sold |
 | `reports/figures/h3.png` | VRP against the hedged gain (planned output 5) |
 | `reports/figures/strategy.png` | Cumulative gross and net P&L, and each month's net P&L (planned output 6) |
 
@@ -98,8 +100,25 @@ t-statistics, annualized Sharpe (`× sqrt(12)`), skew, share of winning months, 
 month, maximum drawdown of the running sum (from a starting peak of zero) and CVaR, the mean of the worst
 5% of months (at least one month, so with 36 trades it is the worst month).
 
-Not covered: worst day (P&L is only measured at expiry, not marked daily), the strangle variant (roadmap
-17), and option spreads by moneyness bucket from the `mbp-1` sample (roadmap 13); the entry half-spread is
+### Strangle as robustness, and the worst months
+
+The baseline sells the at-the-money straddle. `run_structures` runs the same monthly rule on a strangle:
+sell the out-of-the-money put and call about 5% below and above the forward (`monthly_trades(...,
+"strangle", otm=0.05)`; the legs are the ones closest to ln(1 ± otm) in the chain's log-moneyness, and a
+leg further than 2 log points from its target gives no trade). The strangle collects less premium and is
+exposed to a move only once it passes the strikes, so it shows whether the result depends on selling the
+at-the-money options. Returns are per unit of entry vega, so the two are comparable even though the
+strangle's vega is smaller. The margin base is the same two legs' notional for both, an assumption.
+`strategy_structures.csv` has one row for the straddle and one per distance, with the number of trades, the
+mean vega sold, gross and net mean, HAC t, Sharpe, skew, worst month and CVaR.
+
+`worst_months` lists the worst trades (default five, by net P&L per unit vega) with what happened: the
+market `move` (`F_T / F - 1`, settlement over the entry forward) and the entry implied vol of the two legs.
+A short option position loses when the futures finish far from where they started, more than the premium
+collected, so the table shows which months were a large move against a low implied vol and which were just
+costs. P&L is only measured at expiry, so this is a table of months, not of days.
+
+Not covered: worst day (P&L is only measured at expiry, not marked daily), and option spreads by moneyness bucket from the `mbp-1` sample (roadmap 13); the entry half-spread is
 taken from each quote's own bid and ask.
 
 ## Checks
@@ -111,5 +130,7 @@ taken from each quote's own bid and ask.
 - `test_strategy`: one trade a month on the first snapshot, at the money, with both legs; short P&L, costs
   and every normalization by hand; cost multiplier; risk metrics by hand, including drawdown from the
   start.
+- `test_strategy` also covers the strangle: legs nearest 5% out of the money, other distances, the
+  tolerance, missing sides, the strike columns for each structure, `run_structures` and `worst_months`.
 - `test_stage7`: the stage on simulated chains writes every table and figure; figures with no data; the
   stage runner and the `doit` graph.
