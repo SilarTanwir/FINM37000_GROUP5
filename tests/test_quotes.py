@@ -53,7 +53,7 @@ def test_futures_mid_at_snapshot():
     f["symbol"] = "ESZ6"
     out = futures_mid_at_snapshot(f.drop(columns="instrument_id"), "15:00")
     assert out.to_dict("records") == [{"date": pd.Timestamp("2026-09-01").date(),
-                                       "underlying": "ESZ6", "F": 5000.25}]
+                                       "underlying": "ESZ6", "F": 5000.25, "F_age_s": 0.0}]
 
 
 def test_cleaning_rules_drop_bad_quotes():
