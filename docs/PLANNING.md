@@ -373,28 +373,28 @@ IDs below are roadmap IDs. GitHub issue numbers are offset by 2 (roadmap #1 is G
 
 Sizes: S ≤ 0.5 day, M ≈ 1–2 days, L ≈ 3+ days. Labels: `infra`, `data`, `pricing`, `vrp`, `hedging`, `analysis`, `docs`, `stretch`.
 
-| ID | Title | Depends on | Size | Acceptance criteria |
-|---|---|---|---|---|
-| 1 | Repo scaffold, tooling, CI | — | M | `pip/uv install` works; `pytest` and `ruff` pass in CI on an empty skeleton; `.env.example` and `.gitignore` in place |
-| 2 | README v0 and PLANNING.md review PR | — | S | README states question and run steps; all teammates approve on GitHub |
-| 3 | Databento client wrapper, cost check, Parquet cache | 1 | M | Cost logged before pull; budget abort works; repeated call hits cache; key read only from env |
-| 4 | Option universe from definitions | 3 | M | `universe.parquet` with strike/expiry/type/underlying; strike sanity check passes (strikes bracket F); documented series choice |
-| 5 | Quote snapshots and cleaning rules | 4 | M | One cleaned snapshot per day; each cleaning rule counted in a log; unit tests on fixtures |
-| 6 | Underlying futures: 5-minute and daily series | 3, 4 | M | Bars for the specific underlying contract; session definition honored; gap handling tested |
-| 7 | Black-76 pricing, Greeks, implied vol | 1 | M | `test_black76` passes; IV solver robust to edge cases |
-| 8 | Parity-implied forward and chain assembly | 5, 6, 7 | M | `chain.parquet` with F, τ, mid, IV, delta, moneyness; futures-vs-parity forward gap diagnostic plotted |
-| 9 | Variance-swap strip with diagnostics | 7, 8 | L | `test_strip_flat_vol` passes; truncation/discretization flags emitted; bid/mid/ask variants |
-| 10 | Realized variance (daily and 5-minute) | 6 | M | `test_realized_variance` passes; horizon matched to each expiry |
-| 11 | VRP time series and descriptives | 9, 10 | M | `vrp.parquet`; plots 1–3 of §6; constant-maturity option implemented |
-| 12 | Delta-hedge simulator | 8 | L | `test_hedge_zero_premium` passes; three hedge-delta variants; gains in all three normalizations |
-| 13 | Cost model and calibration sample | 5 | M | Spread by moneyness bucket from a small `mbp-1` sample; cost function tested |
-| 14 | Inference module and bucket analysis | 12 | L | Naive/HAC/clustered/bootstrap SEs; no-look-ahead regimes; moneyness × maturity × regime table |
-| 15 | Reconciliation of VRP and hedged gains (H3) | 11, 14 | M | Scatter and correlation with confidence interval; written interpretation |
-| 16 | Strategy backtest and risk metrics | 12, 13, 14 | L | Monthly short hedged straddle; gross and net P&L; Sharpe, skew, CVaR, worst months |
-| 17 | Robustness suite | 11, 16 | M | RV frequency, snapshot time, hedge delta, quote variant, strike-coverage threshold, cost multiplier |
-| 18 | Synthetic data generator and smoke test | 7 | M | `synthetic.py`; full pipeline runs offline in CI |
-| 19 | Reporting and final README | 15, 16, 17 | M | Every README figure produced by a documented command; limitations written |
-| 20 | Option-chain quality and synchronization diagnostics | 5, 6 | M | Daily strike-coverage, quote-age and option/futures synchronization diagnostics; configurable thresholds; failed chains flagged or rejected with reasons; diagnostic summary produced |
+| ID | Title | Depends on | Size | Acceptance criteria | GitHub · status (20 Oct 2026) |
+|---|---|---|---|---|---|
+| 1 | Repo scaffold, tooling, CI | — | M | `pip/uv install` works; `pytest` and `ruff` pass in CI on an empty skeleton; `.env.example` and `.gitignore` in place | #3 · done |
+| 2 | README v0 and PLANNING.md review PR | — | S | README states question and run steps; all teammates approve on GitHub | #4 · done |
+| 3 | Databento client wrapper, cost check, Parquet cache | 1 | M | Cost logged before pull; budget abort works; repeated call hits cache; key read only from env | #5 · done |
+| 4 | Option universe from definitions | 3 | M | `universe.parquet` with strike/expiry/type/underlying; strike sanity check passes (strikes bracket F); documented series choice | #6 · done |
+| 5 | Quote snapshots and cleaning rules | 4 | M | One cleaned snapshot per day; each cleaning rule counted in a log; unit tests on fixtures | #7 · done |
+| 6 | Underlying futures: 5-minute and daily series | 3, 4 | M | Bars for the specific underlying contract; session definition honored; gap handling tested | #8 · done |
+| 7 | Black-76 pricing, Greeks, implied vol | 1 | M | `test_black76` passes; IV solver robust to edge cases | #9 · done |
+| 8 | Parity-implied forward and chain assembly | 5, 6, 7 | M | `chain.parquet` with F, τ, mid, IV, delta, moneyness; futures-vs-parity forward gap diagnostic plotted | #10 · done |
+| 9 | Variance-swap strip with diagnostics | 7, 8 | L | `test_strip_flat_vol` passes; truncation/discretization flags emitted; bid/mid/ask variants | #11 · code merged (#36); real-data run open |
+| 10 | Realized variance (daily and 5-minute) | 6 | M | `test_realized_variance` passes; horizon matched to each expiry | #12 · done |
+| 11 | VRP time series and descriptives | 9, 10 | M | `vrp.parquet`; plots 1–3 of §6; constant-maturity option implemented | #13 · code merged (#36); real-data run open |
+| 12 | Delta-hedge simulator | 8 | L | `test_hedge_zero_premium` passes; three hedge-delta variants; gains in all three normalizations | #14 · core merged (#33); stage 6 driver in #43 |
+| 13 | Cost model and calibration sample | 5 | M | Spread by moneyness bucket from a small `mbp-1` sample; cost function tested | #15 · cost function merged (#33); `mbp-1` calibration open |
+| 14 | Inference module and bucket analysis | 12 | L | Naive/HAC/clustered/bootstrap SEs; no-look-ahead regimes; moneyness × maturity × regime table | #16 · SEs and regimes merged (#33); bucket table open |
+| 15 | Reconciliation of VRP and hedged gains (H3) | 11, 14 | M | Scatter and correlation with confidence interval; written interpretation | #17 · code in #43; interpretation needs real data |
+| 16 | Strategy backtest and risk metrics | 12, 13, 14 | L | Monthly short hedged straddle; gross and net P&L; Sharpe, skew, CVaR, worst months | #18 · in #43 and #45 |
+| 17 | Robustness suite | 11, 16 | M | RV frequency, snapshot time, hedge delta, quote variant, strike-coverage threshold, cost multiplier | #19 · open |
+| 18 | Synthetic data generator and smoke test | 7 | M | `synthetic.py`; full pipeline runs offline in CI | #20 · open |
+| 19 | Reporting and final README | 15, 16, 17 | M | Every README figure produced by a documented command; limitations written | #21 · open |
+| 20 | Option-chain quality and synchronization diagnostics | 5, 6 | M | Daily strike-coverage, quote-age and option/futures synchronization diagnostics; configurable thresholds; failed chains flagged or rejected with reasons; diagnostic summary produced | #23 · in #44 |
 
 Critical path: 1 → 3 → 4 → 5/6 → 20 → 8 → 9/12 → 14 → 16 → 19. Issues 7, 10, 13 and 18 can run in parallel early.
 
@@ -418,12 +418,12 @@ Agreements (proposed in the README PR; approve or comment there):
 
 ## 12. Milestones (suggested; align with the course's Part 2, Part 3 and Completion requirements once confirmed)
 
-| Milestone | Target content |
-|---|---|
-| M1 (Part 1) | Repo, README, issues, this plan reviewed and approved |
-| M2 | Scaffold, Black-76 + tests, data client, universe, quote snapshots (#1–8 largely done) |
-| M3 | Strip, realized variance, first VRP series, hedge simulator on synthetic and one real month |
-| M4 (Completion) | Full analysis, strategy, robustness, reporting, polished README |
+| Milestone | Target content | Status (20 Oct 2026) |
+|---|---|---|
+| M1 (Part 1) | Repo, README, issues, this plan reviewed and approved | Done |
+| M2 | Scaffold, Black-76 + tests, data client, universe, quote snapshots (#1–8 largely done) | Done (roadmap 1–8 merged) |
+| M3 | Strip, realized variance, first VRP series, hedge simulator on synthetic and one real month | In progress: code merged and tested on simulated data; real-data run open (#35) |
+| M4 (Completion) | Full analysis, strategy, robustness, reporting, polished README | In progress: H3 and strategy in #43; robustness, reporting open |
 
 ---
 
