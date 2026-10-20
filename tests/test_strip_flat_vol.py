@@ -188,3 +188,60 @@ def test_strip_table_reports_dropped_quotes(flat_vol_chain):
     row = strip_table(chain).iloc[0]
     assert row["n_dropped_iv"] >= 1 and row["sw_mid"] == pytest.approx(0.2**2, rel=0.01)
     assert strip_table(chain, max_iv=None).iloc[0]["sw_mid"] > 2 * row["sw_mid"]
+
+
+# --- no quotes near the money (issue #42, Tanwir's review of #36) ------------------------------------------
+
+def _hole_around_the_money(chain, F, width=0.15):
+    """Drop every strike from (1 - width) F up to F, as when stage 2 removes the no-quote strikes."""
+    return chain[~chain["strike"].between(F * (1 - width), F)]
+
+
+def test_hole_around_the_money_gives_no_swap_rate_instead_of_a_negative_one(flat_vol_chain):
+    chain, F, r, tau = flat_vol_chain(sigma=0.2, tau=100 / 365)
+    holed = _hole_around_the_money(chain, F)
+    unguarded = variance_swap_rate(holed, F, r, tau, max_k0_gap_pct=None)
+    assert unguarded.sw < 0  # the correction (F/K0 - 1)^2 / tau outweighs the sum: impossible for a variance
+    assert not unguarded.k0_gap_flag and not unguarded.truncation_flag  # the truncation flag does not see it
+    guarded = variance_swap_rate(holed, F, r, tau)
+    assert math.isnan(guarded.sw) and guarded.k0_gap_flag
+    assert guarded.k0_gap_pct == pytest.approx(0.15, abs=0.01)
+    assert guarded.k0 == unguarded.k0 and guarded.correction == pytest.approx(unguarded.correction)
+
+
+def test_k0_gap_threshold_is_configurable(flat_vol_chain):
+    chain, F, r, tau = flat_vol_chain(sigma=0.2)
+    holed = _hole_around_the_money(chain, F, width=0.005)  # K0 about 0.5% below F
+    res = variance_swap_rate(holed, F, r, tau)
+    assert not res.k0_gap_flag and 0.003 < res.k0_gap_pct < 0.007 and res.sw > 0
+    assert variance_swap_rate(holed, F, r, tau, max_k0_gap_pct=0.002).k0_gap_flag
+    assert variance_swap_rate(holed, F, r, tau, max_k0_gap_pct=0.002).sw != variance_swap_rate(
+        holed, F, r, tau, max_k0_gap_pct=0.002).sw  # NaN
+    assert not variance_swap_rate(holed, F, r, tau, max_k0_gap_pct=None).k0_gap_flag
+
+
+def test_normal_chains_are_not_flagged(flat_vol_chain):
+    for F in (5000.0, 5003.0, 5024.0):
+        chain, _, r, tau = flat_vol_chain(sigma=0.2, F=F)
+        res = variance_swap_rate(chain, F, r, tau)
+        assert not res.k0_gap_flag and res.k0_gap_pct < 0.01 and res.sw == pytest.approx(0.04, rel=0.01)
+
+
+def test_strip_table_reports_the_gap_and_leaves_flagged_chains_empty(flat_vol_chain):
+    from esvrp.vrp.strip import strip_table
+
+    frames = []
+    for day, holed in [("2026-07-21", False), ("2026-07-22", True)]:
+        chain, F, r, tau = flat_vol_chain(sigma=0.2, tau=100 / 365)
+        if holed:
+            chain = _hole_around_the_money(chain, F)
+        frames.append(chain.assign(date=day, expiry="2026-10-30", underlying="ESZ6", F=F, r=r, tau=tau,
+                                   bid=chain["mid"], ask=chain["mid"]))
+    table = strip_table(pd.concat(frames, ignore_index=True)).set_index("date")
+    assert not table.loc["2026-07-21", "k0_gap_flag"] and table.loc["2026-07-21", "sw_mid"] > 0
+    bad = table.loc["2026-07-22"]
+    assert bad["k0_gap_flag"] and bad["k0_gap_pct"] > 0.1
+    assert bad[["sw_mid", "sw_bid", "sw_ask"]].isna().all()
+    assert not (table[["sw_mid", "sw_bid", "sw_ask"]].dropna() < 0).any().any()  # no negative swap rate
+    unguarded = strip_table(pd.concat(frames, ignore_index=True), max_k0_gap_pct=None).set_index("date")
+    assert unguarded.loc["2026-07-22", "sw_mid"] < 0

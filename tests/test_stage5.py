@@ -142,6 +142,7 @@ def test_stage5_reads_the_new_config_keys(stage_inputs):
     data, reports = stage_inputs
     cfg = load_config()
     assert cfg.realized.max_gap_days == 2 and cfg.strip.max_iv == 1.0 and cfg.strip.min_iv == 0.01
+    assert cfg.strip.max_k0_gap_pct == 0.01
     strict = dataclasses.replace(cfg, realized=dataclasses.replace(cfg.realized, max_gap_days=0.001))
     strict = dataclasses.replace(strict, strip=dataclasses.replace(strict.strip, min_front_days=1))
     t = run(strict, data, reports)
@@ -149,3 +150,25 @@ def test_stage5_reads_the_new_config_keys(stage_inputs):
     with pytest.raises(Exception, match="max_gap_days"):
         from esvrp.config import _validate_values
         _validate_values(dataclasses.replace(cfg, realized=dataclasses.replace(cfg.realized, max_gap_days=0)))
+
+
+def test_stage5_flags_chains_without_quotes_near_the_money_and_keeps_them_out_of_the_premium(stage_inputs):
+    data, reports = stage_inputs
+    chain = pd.read_parquet(data / "chain.parquet")
+    victim = chain[(chain["date"] == chain["date"].iloc[0]) & (chain["tau"] == chain["tau"].max())]
+    holed = ~chain.index.isin(victim.index[victim["strike"].between(0.95 * 5000, 5000)])
+    chain[holed].to_parquet(data / "chain.parquet")
+    t = run(_cfg(), data, reports)
+    s = t["strip"]
+    assert s["k0_gap_flag"].sum() == 1 and s["sw_mid"].isna().sum() == 1
+    assert (s["sw_mid"].dropna() > 0).all()
+    assert t["vrp"]["vrp_diff"].isna().sum() == 1  # that chain has no premium
+
+
+def test_config_rejects_a_bad_k0_gap_threshold():
+    from esvrp.config import ConfigError, _validate_values
+
+    cfg = load_config()
+    bad = dataclasses.replace(cfg, strip=dataclasses.replace(cfg.strip, max_k0_gap_pct=0.0))
+    with pytest.raises(ConfigError, match="max_k0_gap_pct"):
+        _validate_values(bad)

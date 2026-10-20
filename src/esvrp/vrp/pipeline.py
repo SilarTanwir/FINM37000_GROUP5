@@ -58,7 +58,8 @@ def run(cfg: Any, data_dir: Path = DATA_DIR, report_dir: Path = REPORT_DIR) -> d
     rv_col = "rv_5m" if "5m" in cfg.realized.frequency else "rv_daily"
 
     # Each expiry at its own maturity (matched horizon, §4.3).
-    strips = strip_table(chain, cfg.cleaning.min_range_pct, cfg.strip.min_iv, cfg.strip.max_iv)
+    strips = strip_table(chain, cfg.cleaning.min_range_pct, cfg.strip.min_iv, cfg.strip.max_iv,
+                        cfg.strip.max_k0_gap_pct)
     rv = rv_table(chain[CHAIN_KEYS], bars_5m, daily, cfg.realized.max_gap_days)
     vrp = vrp_table(strips, rv, "diff", sw_col=sw_col, rv_col=rv_col)
 
@@ -85,10 +86,12 @@ def run(cfg: Any, data_dir: Path = DATA_DIR, report_dir: Path = REPORT_DIR) -> d
 
     log.info("Stage 5: %d chains, %d with a premium (mean RV - SW %.5f); %d chains left out because the bars "
              "do not cover the window (max_gap_days=%s); %d quotes dropped by the implied-vol bounds; "
+             "%d chains without a swap rate because K0 is more than %.1f%% of F below F; "
              "%d constant-maturity dates (%d extrapolated, %d with a premium) -> %s",
              len(strips), int(vrp["vrp_diff"].notna().sum()), vrp["vrp_diff"].mean(),
              int((~rv["complete_" + ("5m" if rv_col == "rv_5m" else "daily")]).sum()),
-             cfg.realized.max_gap_days, int(strips["n_dropped_iv"].sum()), len(cm),
+             cfg.realized.max_gap_days, int(strips["n_dropped_iv"].sum()), int(strips["k0_gap_flag"].sum()),
+             100 * cfg.strip.max_k0_gap_pct, len(cm),
              int(cm["extrapolated"].sum()) if len(cm) else 0,
              int(vrp_cm["vrp_diff"].notna().sum()) if len(cm) else 0, data_dir)
     return tables

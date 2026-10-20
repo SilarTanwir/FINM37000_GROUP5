@@ -52,6 +52,8 @@ class StripResult:
     k0_one_sided: bool = False  # only a call or only a put was available at K0
     correction: float = float("nan")  # the (F/K0 - 1)^2 / tau term that was subtracted
     n_dropped_iv: int = 0  # quotes removed because their implied vol was outside [min_iv, max_iv]
+    k0_gap_pct: float = float("nan")  # (F - K0) / F: how far below F the highest usable strike is
+    k0_gap_flag: bool = False  # True if the gap exceeded max_k0_gap_pct and SW was left empty
 
 
 def _empty(truncation: bool = True, n_dropped_iv: int = 0) -> StripResult:
@@ -80,6 +82,7 @@ def _within_iv_bounds(
 def variance_swap_rate(
     chain_slice: pd.DataFrame, F: float, r: float, tau: float, price_col: str = "mid",
     min_range_pct: float = 0.10, min_iv: float = 0.01, max_iv: float | None = 1.0,
+    max_k0_gap_pct: float | None = 0.01,
 ) -> StripResult:
     """VIX-style discrete strip (baseline) with bid/mid/ask variants.
 
@@ -87,7 +90,12 @@ def variance_swap_rate(
     Quotes with a missing or non-positive price are ignored, so one-sided quotes enter the `bid` variant
     but not `mid` or `ask`. Quotes with an implied vol outside [`min_iv`, `max_iv`] (default 1% to 100%,
     as in Bakshi-Kapadia) are dropped before the strip is built, because a single junk quote far from the
-    money can dominate the sum (`n_dropped_iv` counts them); `max_iv=None` turns the cap off. Returns
+    money can dominate the sum (`n_dropped_iv` counts them); `max_iv=None` turns the cap off.
+
+    K0 is the highest usable strike at or below F. If the quotes around the money are missing, K0 falls
+    far below F and the correction `(F/K0 - 1)^2 / tau` outweighs the sum, which can make SW negative
+    (impossible for a variance). So when `(F - K0) / F` (`k0_gap_pct`) exceeds `max_k0_gap_pct` (default
+    1%), SW is left empty (NaN) and `k0_gap_flag` is set; `None` turns the guard off. Returns
     NaN (and `n_strikes == 0`) if `F` or `tau` is invalid or no OTM option is available.
     `truncation_flag` is set when the strikes do not span at least F(1 - min_range_pct) to
     F(1 + min_range_pct), which biases SW downward (§4.3, error 1).
@@ -109,6 +117,7 @@ def variance_swap_rate(
     if q.empty or not (q["strike"] <= F).any():
         return _empty(n_dropped_iv=n_dropped_iv)
     k0 = float(q.loc[q["strike"] <= F, "strike"].max())
+    k0_gap = (F - k0) / F
 
     # Average if a strike has duplicate quotes, then pivot to one put and one call column per strike.
     px = q.groupby(["strike", "cp"])["price"].mean().unstack("cp").reindex(columns=["p", "c"])
@@ -135,6 +144,9 @@ def variance_swap_rate(
     correction = (F / k0 - 1.0) ** 2 / tau
     contributions = pd.Series(contrib, index=otm.index, name="contribution")
     sw = float(np.nansum(contrib) - correction) if len(strikes) > 1 else float("nan")
+    k0_gap_flag = bool(max_k0_gap_pct is not None and k0_gap > max_k0_gap_pct)
+    if k0_gap_flag:
+        sw = float("nan")
 
     lo, hi = float(strikes.min()), float(strikes.max())
     truncated = bool(lo > F * (1 - min_range_pct) or hi < F * (1 + min_range_pct))
@@ -143,22 +155,25 @@ def variance_swap_rate(
         contributions=contributions,
         max_strike_gap=float(np.nanmax(dk)) if len(strikes) > 1 else float("nan"),
         k0_one_sided=k0_one_sided, correction=float(correction), n_dropped_iv=n_dropped_iv,
+        k0_gap_pct=float(k0_gap), k0_gap_flag=k0_gap_flag,
     )
 
 
 def strip_table(
     chain: pd.DataFrame, min_range_pct: float = 0.10, min_iv: float = 0.01, max_iv: float | None = 1.0,
+    max_k0_gap_pct: float | None = 0.01,
 ) -> pd.DataFrame:
     """Run the strip on every chain (date, expiry) of `chain.parquet`; one row per chain.
 
     Uses the chain's own `F`, `r` and `tau` (stage 4). Columns: date, expiry, underlying, tau, F,
     snapshot_ts (if in the chain), then `sw_mid`, `sw_bid`, `sw_ask` and the diagnostics of the mid
-    strip (k0, n_strikes, strike range, truncation flag, widest strike gap, correction term).
+    strip (k0, n_strikes, strike range, truncation flag, widest strike gap, correction term, `k0_gap_pct`
+    and `k0_gap_flag`).
     """
     rows = []
     for (date, expiry), g in chain.groupby(["date", "expiry"], sort=True):
         F, r, tau = float(g["F"].iloc[0]), float(g["r"].iloc[0]), float(g["tau"].iloc[0])
-        res = {col: variance_swap_rate(g, F, r, tau, col, min_range_pct, min_iv, max_iv)
+        res = {col: variance_swap_rate(g, F, r, tau, col, min_range_pct, min_iv, max_iv, max_k0_gap_pct)
                for col in PRICE_COLUMNS}
         mid = res["mid"]
         rows.append({
@@ -168,5 +183,6 @@ def strip_table(
             "n_strikes": mid.n_strikes, "strike_min": mid.strike_min, "strike_max": mid.strike_max,
             "truncation_flag": mid.truncation_flag, "max_strike_gap": mid.max_strike_gap,
             "k0_one_sided": mid.k0_one_sided, "correction": mid.correction, "n_dropped_iv": mid.n_dropped_iv,
+            "k0_gap_pct": mid.k0_gap_pct, "k0_gap_flag": mid.k0_gap_flag,
         })
     return pd.DataFrame(rows)

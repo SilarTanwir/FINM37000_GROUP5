@@ -24,6 +24,7 @@ strip:
   min_front_days: 8            # use next two expiries if nearest is closer (Carr-Wu)
   max_iv: 1.0                  # drop strip inputs with implied vol above this (Bakshi-Kapadia: 100%)
   min_iv: 0.01                 # ... or below this (Bakshi-Kapadia: 1%)
+  max_k0_gap_pct: 0.01         # no swap rate if K0 is more than 1% of F below F (no quotes near the money)
 realized:
   frequency: [daily, 5m]
   session: full_globex         # full_globex | rth   (decided, §15.3)

@@ -54,6 +54,7 @@ class StripConfig:
     min_front_days: int
     max_iv: float  # strip inputs with an implied vol above this are dropped (Bakshi-Kapadia: 100%)
     min_iv: float  # ... or below this (Bakshi-Kapadia: 1%)
+    max_k0_gap_pct: float  # no swap rate if K0 is this fraction of F below F (no quotes near the money)
 
 
 @dataclass(frozen=True)
@@ -170,6 +171,8 @@ def _validate_values(cfg: Config) -> None:
         raise ConfigError("inference.hac_lags must be an int or 'auto'")
     if not 0 <= cfg.strip.min_iv < cfg.strip.max_iv:
         raise ConfigError("strip.min_iv must be non-negative and below strip.max_iv")
+    if not 0 < cfg.strip.max_k0_gap_pct < 1:
+        raise ConfigError("strip.max_k0_gap_pct must be in (0, 1)")
     if cfg.realized.max_gap_days <= 0:
         raise ConfigError("realized.max_gap_days must be positive")
     if sorted(cfg.hedging.maturity_buckets_days) != cfg.hedging.maturity_buckets_days:

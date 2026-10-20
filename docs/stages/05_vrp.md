@@ -31,6 +31,14 @@ Input: one chain of `data/chain.parquet` (one expiry on one day, §4.1) with its
   contributed 1.00 to a swap rate of about 0.03. The chain's `iv` (mid) is used where it exists; quotes
   without one (one-sided quotes) get their implied vol from the price used. `n_dropped_iv` counts them;
   `max_iv=None` turns the cap off.
+- **No quotes near the money:** `k0_gap_pct = (F - K0) / F` is recorded. If it exceeds
+  `strip.max_k0_gap_pct` (1%), the swap rate is left empty (NaN) and `k0_gap_flag` is set. Otherwise a hole
+  around the money (stage 2 drops strikes with no bid and no ask) pushes K0 far below F, and the correction
+  `(F/K0 - 1)^2 / tau` outweighs the sum: on real chains more than 60 days out this gave negative swap
+  rates (7 of 452 chains in July-September 2026; for example 22 July, December expiry, `sw_mid` -0.113 with
+  correction 0.140). `truncation_flag` does not catch it, because the strikes still span far on both
+  sides. The premium of a flagged chain is NaN, and `constant_maturity` skips it. `None` turns the guard
+  off. Not done: a second rule on the number of two-sided quotes within a few strikes of F (issue #42).
 - `truncation_flag` is set when the strikes do not span `F(1 - m)` to `F(1 + m)` with
   `m = cleaning.min_range_pct` (10%). Truncation biases `SW` downward.
 - Invalid `F` or `tau`, or no usable OTM option, gives NaN with `n_strikes == 0`.
@@ -144,7 +152,7 @@ the figures (including empty input).
 | `reports/figures/sw_vs_rv.png`, `vrp_distribution.png`, `rv_comparison.png` | Plots 1-3 for every chain |
 | `reports/figures/cm_sw_vs_rv.png`, `cm_vrp_distribution.png` | The same for the constant-maturity series |
 
-Config used: `strip.price_col` (which `sw_*` column is the premium's SW; default mid),
+Config used: `strip.max_k0_gap_pct` (the K0 guard above), `strip.min_iv` / `strip.max_iv`, `realized.max_gap_days`, `strip.price_col` (which `sw_*` column is the premium's SW; default mid),
 `strip.min_front_days` (8), `cleaning.min_range_pct` (truncation flag) and `realized.frequency` (`rv_5m`
 is the primary RV if `5m` is listed, otherwise `rv_daily`). `strip.method: iv_grid` raises
 `NotImplementedError` until issue #31 is done. The target maturity is fixed at 30 days (`TARGET_DAYS`).
