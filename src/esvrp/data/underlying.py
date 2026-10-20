@@ -30,6 +30,7 @@ SESSIONS: dict[str, tuple[str, str] | None] = {"full_globex": None, "rth": ("08:
 
 SESSION_OPEN_CT = "17:00"
 SETTLEMENT_STAT = 3  # Databento statistics `stat_type` for the settlement price
+RV_TAIL_DAYS = 30  # the constant 30-day realized variance (§4.3) runs this far past a snapshot
 
 BAR_COLUMNS = ["underlying", "date", "ts", "open", "high", "low", "close", "volume"]
 
@@ -97,19 +98,23 @@ def build_daily(raw: pd.DataFrame, settle: pd.Series, session: str) -> pd.DataFr
     return daily.sort_values(["underlying", "date"]).reset_index(drop=True)
 
 
-def contract_windows(universe: pd.DataFrame, start: Any, end: Any) -> pd.DataFrame:
+def contract_windows(universe: pd.DataFrame, start: Any, end: Any,
+                     tail_days: int = RV_TAIL_DAYS) -> pd.DataFrame:
     """Trade dates each underlying contract is needed for: columns underlying, start, end.
 
     A contract is needed while any option written on it is live, from the first listing to the last
-    expiry, clipped to the sample. Contracts with no live option in the sample are left out.
+    expiry, clipped to the sample. Contracts with no live option in the sample are left out. The window
+    then runs `tail_days` past the last expiry (still clipped to the sample), so a realized-variance
+    window that starts on one of the last snapshots and outlives the options has bars to its end.
     """
     start, end = pd.Timestamp(start).date(), pd.Timestamp(end).date()
     g = universe.groupby("underlying").agg(first=("activation", "min"), last=("expiry", "max"))
     first = g["first"].dt.tz_convert(TZ).dt.date.where(g["first"].notna(), start)
     last = g["last"].dt.tz_convert(TZ).dt.date
+    live = (first.clip(lower=start) <= last.clip(upper=end)).to_numpy()
     w = pd.DataFrame({"underlying": g.index, "start": first.clip(lower=start).to_numpy(),
-                      "end": last.clip(upper=end).to_numpy()})
-    return w[w["start"] <= w["end"]].reset_index(drop=True)
+                      "end": (last + pd.Timedelta(days=tail_days)).clip(upper=end).to_numpy()})
+    return w[live].reset_index(drop=True)
 
 
 def _session_open(day: Any) -> pd.Timestamp:
