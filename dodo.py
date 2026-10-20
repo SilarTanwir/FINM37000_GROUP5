@@ -62,7 +62,7 @@ def task_hedging():
     """Stage 6: delta-hedged gains per option."""
     return _stage(6, "hedging",
                   [f"{D}/chain.parquet", f"{D}/underlying_daily.parquet",
-                   "src/esvrp/hedging/simulator.py"],
+                   "src/esvrp/hedging/simulator.py", "src/esvrp/hedging/costs.py"],
                   [f"{D}/hedged_gains.parquet"], "Stage 6")
 
 
@@ -71,8 +71,11 @@ def task_analysis():
     return _stage(7, "analysis",
                   [f"{D}/vrp.parquet", f"{D}/hedged_gains.parquet", "src/esvrp/hedging/costs.py",
                    "src/esvrp/analysis/inference.py", "src/esvrp/analysis/strategy.py",
-                   "src/esvrp/analysis/buckets.py"],
-                  [f"{R}/tables/summary.csv", f"{R}/tables/strategy.csv"], "Stage 7")
+                   "src/esvrp/analysis/buckets.py", "src/esvrp/analysis/reconcile.py",
+                   "src/esvrp/analysis/pipeline.py", "src/esvrp/reporting/figures.py"],
+                  # summary.csv is the bucket table of roadmap 14, not written yet.
+                  [f"{R}/tables/summary.csv", f"{R}/tables/h3.csv", f"{R}/tables/strategy.csv",
+                   f"{D}/h3.parquet"], "Stage 7")
 
 
 def task_report():
