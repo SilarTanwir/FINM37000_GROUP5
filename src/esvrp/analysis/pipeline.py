@@ -5,6 +5,8 @@ Implements PLANNING.md §6 stage 7 (§4.5-4.7). Reads `vrp.parquet` (stage 5) an
 `report_dir`:
 
 - `tables/h3.csv`: H3 statistics, every chain and the non-overlapping monthly subsample (roadmap 15)
+- `tables/h3_sensitivity.csv`: H3 under the other hedge deltas and a 42-day bootstrap block (#17)
+- `tables/h3_disagreements.csv`: monthly chains where VRP and HG have opposite signs, with diagnostics
 - `tables/strategy.csv`: risk metrics of the monthly short straddle, gross and net (roadmap 16)
 - `tables/strategy_trades.csv`: one row per monthly trade
 - `figures/h3.png`, `figures/strategy.png`
@@ -20,7 +22,7 @@ from typing import Any
 
 import pandas as pd
 
-from esvrp.analysis.reconcile import chain_hedged_variance, reconcile
+from esvrp.analysis.reconcile import chain_hedged_variance, disagreement_cases, h3_sensitivity, reconcile
 from esvrp.analysis.strategy import run_strategy
 from esvrp.data.client import DATA_DIR, REPO_ROOT
 from esvrp.reporting.figures import h3_figure, strategy_figure
@@ -44,6 +46,10 @@ def run(cfg: Any, data_dir: Path = DATA_DIR, report_dir: Path = REPORT_DIR) -> d
     tables_dir.mkdir(parents=True, exist_ok=True)
     joined.to_parquet(data_dir / "h3.parquet")
     h3.to_csv(tables_dir / "h3.csv")
+    sensitivity = h3_sensitivity(vrp, gains)
+    sensitivity.to_csv(tables_dir / "h3_sensitivity.csv", index=False)
+    disagreements = disagreement_cases(joined)
+    disagreements.to_csv(tables_dir / "h3_disagreements.csv", index=False)
     strategy.metrics.to_csv(tables_dir / "strategy.csv")
     strategy.trades.to_csv(tables_dir / "strategy_trades.csv", index=False)
     h3_figure(joined, h3, figures_dir / "h3.png")
@@ -55,4 +61,5 @@ def run(cfg: Any, data_dir: Path = DATA_DIR, report_dir: Path = REPORT_DIR) -> d
              "points per unit vega, Sharpe %.2f -> %s", int(d.get("n", 0)), d.get("pearson", float("nan")),
              d.get("ci_low", float("nan")), d.get("ci_high", float("nan")), int(net.get("n", 0)),
              net.get("mean", float("nan")), net.get("sharpe", float("nan")), report_dir)
-    return {"h3_chains": joined, "h3": h3, "strategy": strategy.metrics, "strategy_trades": strategy.trades}
+    return {"h3_chains": joined, "h3": h3, "h3_sensitivity": sensitivity, "h3_disagreements": disagreements,
+            "strategy": strategy.metrics, "strategy_trades": strategy.trades}
