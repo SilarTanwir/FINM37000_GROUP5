@@ -137,6 +137,26 @@ NaN handling, Eq. (10) by hand, flat variance preserved under interpolation and 
 rule, bracketing preference, skipped dates, constant-maturity RV against a manual window, descriptives and
 the figures (including empty input).
 
+## H1 test with Newey-West errors (`h1_table`, issue #52)
+
+`vrp_descriptives` reports a naive t, which overstates significance because daily-start 30-day windows
+overlap (§4.6). `h1_table(vrp, vrp_cm, hac_lags)` tests H1 (mean premium < 0) for `vrp_diff` and
+`vrp_log` on two samples:
+
+| Sample | Observations | HAC lag |
+|---|---|---|
+| `constant 30-day (daily, overlapping)` | `vrp_cm`, one per date | 20 (horizon of 21 trading days minus one, `inference.hac_lags: auto`), plus `t_hac_30` with Carr-Wu's 30 |
+| `matched, monthly (non-overlapping)` | One chain per expiry, the first date in its month (`monthly_subsample`, the strategy's entry rule) | 6 (Carr-Wu) |
+
+Columns: `n`, `mean`, `se_naive`, `t_naive`, `hac_lags`, `se_hac`, `t_hac`, `t_hac_30` and, for the log
+premium, `sharpe_short`: Carr-Wu's Sharpe ratio for shorting variance, the mean of -ln(RV/SW) over its
+Newey-West standard deviation, annualized by sqrt(365/30) (daily) or sqrt(12) (monthly). A negative mean
+with `t_hac` below about -2 supports H1; the naive t is kept to show how much the overlap inflates it.
+
+Tests (`tests/test_premium.py`): on simulated premia that share 20 of 21 days, the HAC |t| is less than
+half the naive |t|; the monthly subsample has one row per expiry with lag 6; the Sharpe ratio by hand; a
+configured lag; empty inputs.
+
 ## Running stage 5 (`src/esvrp/vrp/pipeline.py`)
 
 `python -m esvrp.stages 5` (or `doit vrp`) needs `data/chain.parquet` (stage 4) and
@@ -149,6 +169,7 @@ the figures (including empty input).
 | `data/vrp.parquet` | `vrp_table`: `sw`, `rv`, `vrp_diff` (primary), `vrp_log`, `vrp_swap_return`, at each expiry's own maturity |
 | `data/strip_cm.parquet`, `rv_cm.parquet`, `vrp_cm.parquet` | The constant 30-day series (Carr-Wu comparable), with `extrapolated` |
 | `reports/tables/vrp_descriptives.csv`, `vrp_cm_descriptives.csv` | `vrp_descriptives` (naive t only) |
+| `reports/tables/h1.csv` | `h1_table`: the H1 test with naive and Newey-West t-statistics |
 | `reports/figures/sw_vs_rv.png`, `vrp_distribution.png`, `rv_comparison.png` | Plots 1-3 for every chain |
 | `reports/figures/cm_sw_vs_rv.png`, `cm_vrp_distribution.png` | The same for the constant-maturity series |
 

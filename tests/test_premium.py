@@ -11,6 +11,7 @@ from esvrp.reporting.figures import rv_comparison_figure, sw_vs_rv_figure, vrp_d
 from esvrp.vrp.premium import (
     constant_maturity,
     constant_maturity_rv,
+    h1_table,
     vrp_descriptives,
     vrp_table,
 )
@@ -191,6 +192,60 @@ def test_descriptives_hand_computed():
     assert row["share_negative"] == pytest.approx(0.6)
     assert row["naive_t"] == pytest.approx(-0.012 / (x["vrp_diff"].std() / math.sqrt(5)))
     assert d.loc["vrp_log", "n"] == 0 and math.isnan(d.loc["vrp_log", "mean"])
+
+
+# --- H1 test (issue #52) ---------------------------------------------------------------------------------
+
+def _overlapping_cm(mean=-0.005, n=750, seed=7):
+    """Daily 30-day premia: a rolling 21-day sum of iid daily shocks, so neighbours share 20 of 21 days."""
+    rng = np.random.default_rng(seed)
+    shocks = rng.normal(0, 0.004, n + 20)
+    x = mean + pd.Series(shocks).rolling(21).sum().dropna().to_numpy() / np.sqrt(21)
+    dates = pd.bdate_range("2023-10-02", periods=n)
+    return pd.DataFrame({"date": dates.date, "vrp_diff": x, "vrp_log": x * 10})
+
+
+def _monthly_chains(n_months=24, seed=8):
+    """Matched chains: every business day of an expiry's month and the month before, one EW expiry each."""
+    rng = np.random.default_rng(seed)
+    rows = []
+    for m in pd.period_range("2024-01", periods=n_months, freq="M"):
+        last = pd.bdate_range(m.start_time, m.end_time)[-1]
+        expiry = (last + pd.Timedelta(hours=15)).tz_localize("America/Chicago").tz_convert("UTC")
+        for d in pd.bdate_range(m.start_time - pd.Timedelta(days=28), last - pd.Timedelta(days=1)):
+            rows.append({"date": d.date(), "expiry": expiry, "vrp_diff": rng.normal(-0.004, 0.01),
+                         "vrp_log": rng.normal(-0.3, 0.5)})
+    return pd.DataFrame(rows)
+
+
+def test_h1_hac_t_is_smaller_than_naive_on_overlapping_premia():
+    h = h1_table(pd.DataFrame(), _overlapping_cm()).set_index(["sample", "premium"])
+    row = h.loc[("constant 30-day (daily, overlapping)", "vrp_diff")]
+    assert row["n"] == 750 and row["hac_lags"] == 20  # horizon in trading days - 1 (§4.6)
+    assert row["mean"] == pytest.approx(_overlapping_cm()["vrp_diff"].mean())
+    assert abs(row["t_hac"]) < abs(row["t_naive"]) / 2  # overlap inflates the naive t
+    assert np.isfinite(row["t_hac_30"])
+
+
+def test_h1_monthly_subsample_and_sharpe():
+    chains = _monthly_chains()
+    h = h1_table(chains, None, hac_lags=20).set_index(["sample", "premium"])
+    assert list(h.index.get_level_values(0).unique()) == ["matched, monthly (non-overlapping)"]
+    row = h.loc[("matched, monthly (non-overlapping)", "vrp_log")]
+    assert row["n"] == 24 and row["hac_lags"] == 6  # one chain per expiry, Carr-Wu's monthly lag
+    assert np.isnan(row["t_hac_30"])
+    from esvrp.analysis.inference import mean_with_se
+    from esvrp.analysis.reconcile import monthly_subsample
+
+    x = monthly_subsample(chains.sort_values(["date", "expiry"]))["vrp_log"].to_numpy()
+    se = mean_with_se(x, "hac", lags=6).se
+    assert row["sharpe_short"] == pytest.approx(-x.mean() / (se * np.sqrt(len(x))) * np.sqrt(12))
+
+
+def test_h1_configured_lag_and_empty_inputs():
+    h = h1_table(pd.DataFrame(), _overlapping_cm(), hac_lags=10)
+    assert (h["hac_lags"] == 10).all()
+    assert h1_table(pd.DataFrame(), None).empty
 
 
 # --- figures --------------------------------------------------------------------------------------------
