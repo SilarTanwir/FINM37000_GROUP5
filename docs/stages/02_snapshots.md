@@ -30,7 +30,7 @@ before the snapshot are excluded.
 Row rules, in order:
 1. `no_quote`: no bid and no ask.
 2. `zero_bid`: bid zero or missing (switch: `cleaning.drop_zero_bid`).
-3. `crossed` (bid > ask) and `locked` (bid = ask) (switch: `cleaning.drop_crossed`).
+3. `crossed` (bid > ask, switch: `cleaning.drop_crossed`) and `locked` (bid = ask, switch: `cleaning.drop_locked`).
 4. `no_futures_price`: the underlying future had no quote near the snapshot. In practice this is the
    furthest-dated contracts (e.g. `ESZ7`, `ESH8` in Sep 2026), whose options are far outside the
    14–60 day maturities used in the analysis.
