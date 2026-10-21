@@ -8,7 +8,8 @@ writes, under `data_dir`:
 - `vrp.parquet`: the premium per chain, RV - SW primary (roadmap 11), at each expiry's own maturity
 - `strip_cm.parquet`, `rv_cm.parquet`, `vrp_cm.parquet`: the constant 30-day series (Carr-Wu comparable)
 
-and under `report_dir`: `tables/vrp_descriptives.csv`, `tables/vrp_cm_descriptives.csv` and the figures
+and under `report_dir`: `tables/vrp_descriptives.csv`, `tables/vrp_cm_descriptives.csv`, `tables/h1.csv`
+(the H1 test with Newey-West errors) and the figures
 `figures/sw_vs_rv.png`, `vrp_distribution.png`, `rv_comparison.png` (every chain) and
 `figures/cm_sw_vs_rv.png`, `cm_vrp_distribution.png` (constant maturity). No data is pulled.
 """
@@ -30,6 +31,7 @@ from esvrp.reporting.figures import (
 from esvrp.vrp.premium import (
     constant_maturity,
     constant_maturity_rv,
+    h1_table,
     vrp_descriptives,
     vrp_table,
 )
@@ -79,6 +81,9 @@ def run(cfg: Any, data_dir: Path = DATA_DIR, report_dir: Path = REPORT_DIR) -> d
     sw_vs_rv_figure(vrp, figures / "sw_vs_rv.png")
     vrp_distribution_figure(vrp, figures / "vrp_distribution.png")
     rv_comparison_figure(rv, figures / "rv_comparison.png")
+    h1 = h1_table(vrp, vrp_cm, cfg.inference.hac_lags)
+    h1.to_csv(report_dir / "tables" / "h1.csv", index=False)
+    tables["h1"] = h1
     if len(vrp_cm):
         vrp_descriptives(vrp_cm).to_csv(report_dir / "tables" / "vrp_cm_descriptives.csv")
         sw_vs_rv_figure(vrp_cm, figures / "cm_sw_vs_rv.png")
@@ -94,4 +99,7 @@ def run(cfg: Any, data_dir: Path = DATA_DIR, report_dir: Path = REPORT_DIR) -> d
              100 * cfg.strip.max_k0_gap_pct, len(cm),
              int(cm["extrapolated"].sum()) if len(cm) else 0,
              int(vrp_cm["vrp_diff"].notna().sum()) if len(cm) else 0, data_dir)
+    for _, row in h1[h1["premium"] == "vrp_diff"].iterrows():
+        log.info("H1, %s: mean RV - SW %.5f over %d, t naive %.2f, t HAC(%d) %.2f", row["sample"],
+                 row["mean"], row["n"], row["t_naive"], row["hac_lags"], row["t_hac"])
     return tables
