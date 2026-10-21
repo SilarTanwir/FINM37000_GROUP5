@@ -15,6 +15,8 @@ The moneyness × maturity × regime table (roadmap 14, `reports/tables/summary.c
 |---|---|
 | `data/h3.parquet` | One row per chain with both a premium and a hedged gain: `vrp`, `sw`, `rv`, `hg`, `iv2_gw`, `rv_gw`, `n_options`, `tau` |
 | `reports/tables/h3.csv` | H3 statistics for every chain and for the non-overlapping monthly subsample |
+| `reports/tables/h3_sensitivity.csv` | H3 under the `iv_daily` and `rv` hedges and a 42-day bootstrap block |
+| `reports/tables/h3_disagreements.csv` | Monthly chains where VRP and HG have opposite signs, with the gaps that explain them |
 | `reports/tables/strategy.csv` | Risk metrics of the monthly short straddle: per unit vega, dollars and return on margin, each gross and net |
 | `reports/tables/strategy_trades.csv` | One row per monthly trade |
 | `reports/figures/h3.png` | VRP against the hedged gain (planned output 5) |
@@ -71,6 +73,27 @@ Possible outcomes and what each means:
 - Different signs: the premium is concentrated in the strikes the strip sees and the hedged options do
   not (deep out-of-the-money puts), or one measure has a data problem. Check `sw` truncation flags and
   the forward gap first.
+
+### Robustness and disagreement cases (issue #17)
+
+- **Monthly interval.** Fisher's z assumes roughly normal pairs and the premium is skewed, so the monthly
+  row of `h3.csv` also has `ci_boot_low` / `ci_boot_high`, a pairs bootstrap (the monthly chains do not
+  overlap, so pairs can be resampled independently). If the two intervals disagree, trust the bootstrap.
+- **`h3_sensitivity`** reruns H3 for each variant, on every chain and on the monthly series:
+
+  | Variant | Why |
+  |---|---|
+  | `baseline` | `iv_fixed` hedge, 21-day date blocks, as in `h3.csv` |
+  | `block 42 days` | Chains run 14 to 60 days, so two chains can share up to about 41 trading days of returns; longer blocks keep that overlap in the interval. Only the daily row changes |
+  | `iv_daily hedge` | The baseline hedge elsewhere. The identity holds for `iv_fixed`; with `iv_daily` the gain also carries a vega term, so the gap to the baseline measures it |
+  | `rv hedge` | Bakshi-Kapadia's realized-vol delta |
+
+  H3 is robust if the sign of the means and a correlation interval above zero survive every variant.
+- **`disagreement_cases`** lists the monthly chains where VRP and HG have opposite signs and splits each
+  disagreement with `HG - VRP = (RV_gw - RV) - (IV2_gw - SW)`: `skew_gap = SW - IV2_gw` (premium in the
+  strikes the strip sees and the hedged options do not) and `rv_gap = RV_gw - RV` (the futures price moved
+  far from the strikes). `truncation_flag` and `n_strikes` from the strip are kept to rule out a data
+  problem first.
 
 Results on the real sample: to be written once stages 5–7 have run.
 

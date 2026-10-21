@@ -16,6 +16,10 @@ co-move. Both are in annualized variance units:
 
 This is the standard Black-Scholes hedging identity, not a result of either source paper; Bakshi and
 Kapadia's own link is vega-weighted (§4.5). H3 tests agreement in sign and co-movement, not equality.
+
+`h3_sensitivity` reruns the test under other hedge deltas and bootstrap block lengths, and
+`disagreement_cases` lists the non-overlapping months in which the two measures have opposite signs,
+with the gaps that explain them (issue #17).
 """
 
 from __future__ import annotations
@@ -28,6 +32,7 @@ from esvrp.hedging.costs import ES_MULTIPLIER
 
 TZ = "America/Chicago"
 KEYS = ["date", "expiry"]
+DIAGNOSTICS = ["truncation_flag", "n_strikes"]  # strip diagnostics carried from vrp.parquet when present
 
 
 def chain_hedged_variance(hedged_gains: pd.DataFrame, hedge_delta: str = "iv_fixed",
@@ -78,8 +83,11 @@ def reconcile(vrp: pd.DataFrame, hedged: pd.DataFrame, vrp_col: str = "vrp_diff"
     - `pearson` with a 95% interval: a block bootstrap over dates (blocks of `block_days` trading days,
       so the overlap between windows is kept) for the daily series, Fisher's z for the monthly one;
     - `spearman`, the rank correlation.
+
+    The monthly row also has `ci_boot_low` / `ci_boot_high`, a pairs bootstrap interval: Fisher's z assumes
+    roughly normal pairs, and the premium is skewed.
     """
-    cols = [*KEYS, vrp_col, *(c for c in ("sw", "rv") if c in vrp.columns)]
+    cols = [*KEYS, vrp_col, *(c for c in ("sw", "rv", *DIAGNOSTICS) if c in vrp.columns)]
     j = vrp[cols].merge(hedged, on=KEYS, how="inner").rename(columns={vrp_col: "vrp"})
     j = j[np.isfinite(j["vrp"]) & np.isfinite(j["hg"])].sort_values(KEYS).reset_index(drop=True)
     monthly = monthly_subsample(j)
@@ -105,6 +113,7 @@ def _h3_stats(j: pd.DataFrame, lags: int, block_days: int | None, n_boot: int, s
     if block_days is None:
         out["ci_low"], out["ci_high"] = _fisher_ci(r, n)
         out["ci_method"] = "Fisher z"
+        out["ci_boot_low"], out["ci_boot_high"] = _pairs_bootstrap_ci(x, y, n_boot, seed)
     else:
         out["ci_low"], out["ci_high"] = _date_block_bootstrap_ci(j, block_days, n_boot, seed)
         out["ci_method"] = f"date-block bootstrap ({block_days} days)"
@@ -116,6 +125,20 @@ def _fisher_ci(r: float, n: int, z_crit: float = 1.959964) -> tuple[float, float
         return float("nan"), float("nan")
     z, se = np.arctanh(r), 1 / np.sqrt(n - 3)
     return float(np.tanh(z - z_crit * se)), float(np.tanh(z + z_crit * se))
+
+
+def _pairs_bootstrap_ci(x: np.ndarray, y: np.ndarray, n_boot: int, seed: int,
+                        level: float = 0.95) -> tuple[float, float]:
+    """Percentile interval for the Pearson correlation, resampling (x, y) pairs; for independent pairs."""
+    rng = np.random.default_rng(seed)
+    stats = []
+    for idx in rng.integers(0, len(x), size=(n_boot, len(x))):
+        if np.std(x[idx]) > 0 and np.std(y[idx]) > 0:
+            stats.append(np.corrcoef(x[idx], y[idx])[0, 1])
+    if not stats:
+        return float("nan"), float("nan")
+    lo, hi = np.quantile(stats, [(1 - level) / 2, (1 + level) / 2])
+    return float(lo), float(hi)
 
 
 def _date_block_bootstrap_ci(j: pd.DataFrame, block: int, n_boot: int, seed: int,
@@ -144,3 +167,61 @@ def _date_block_bootstrap_ci(j: pd.DataFrame, block: int, n_boot: int, seed: int
         return float("nan"), float("nan")
     lo, hi = np.quantile(stats, [(1 - level) / 2, (1 + level) / 2])
     return float(lo), float(hi)
+
+
+SENSITIVITY_COLUMNS = ["n", "mean_vrp", "mean_hg", "t_vrp_hac", "t_hg_hac", "sign_agree", "pearson", "ci_low",
+                       "ci_high", "ci_method", "spearman"]
+
+
+def h3_sensitivity(vrp: pd.DataFrame, hedged_gains: pd.DataFrame, vrp_col: str = "vrp_diff",
+                   n_boot: int = 2000, seed: int = 0) -> pd.DataFrame:
+    """H3 under other choices: one row per variant and sample (every chain, monthly).
+
+    - `baseline`: `iv_fixed` hedge, 21-day date blocks (what `reconcile` reports).
+    - `block 42 days`: chains run 14 to 60 days to expiry, so two chains can share up to about 41 trading
+      days of returns; longer blocks keep more of that overlap in the interval (daily row only changes).
+    - `iv_daily hedge`, `rv hedge`: the other stage 6 hedge deltas. The identity holds for `iv_fixed`; with
+      `iv_daily` the gain also carries a vega term (implied vol changes over the trade), so the gap to the
+      baseline shows how much that term moves HG.
+    """
+    variants = [("baseline", "iv_fixed", 21), ("block 42 days", "iv_fixed", 42),
+                ("iv_daily hedge", "iv_daily", 21), ("rv hedge", "rv", 21)]
+    frames = []
+    available = set(hedged_gains["hedge_delta"]) if len(hedged_gains) else set()
+    for name, hedge_delta, block in variants:
+        if hedge_delta not in available:
+            continue
+        _, stats = reconcile(vrp, chain_hedged_variance(hedged_gains, hedge_delta), vrp_col,
+                             block_days=block, n_boot=n_boot, seed=seed)
+        stats = stats.reindex(columns=SENSITIVITY_COLUMNS)
+        frames.append(stats.rename_axis("sample").reset_index().assign(variant=name, hedge_delta=hedge_delta,
+                                                                        block_days=block))
+    if not frames:
+        return pd.DataFrame(columns=["variant", "hedge_delta", "block_days", "sample", *SENSITIVITY_COLUMNS])
+    out = pd.concat(frames, ignore_index=True)
+    return out[["variant", "hedge_delta", "block_days", "sample", *SENSITIVITY_COLUMNS]]
+
+
+def disagreement_cases(joined: pd.DataFrame) -> pd.DataFrame:
+    """Non-overlapping months in which the VRP and the hedged gain have opposite signs, with diagnostics.
+
+    `joined` is the first output of `reconcile`. Since `HG - VRP = (RV_gw - RV) - (IV2_gw - SW)`, each row
+    splits the disagreement into its two parts:
+
+    - `skew_gap = SW - IV2_gw`: implied variance the strip prices beyond what the hedged options carry
+      (mostly the put skew). A large positive gap with VRP < 0 < HG means the premium sat in the strikes
+      the strip sees and the near-the-money options do not.
+    - `rv_gap = RV_gw - RV`: realized variance weighted by gamma versus equally; large when the futures
+      price moved far from the strikes during the window.
+
+    Strip diagnostics (`truncation_flag`, `n_strikes`) are kept when present, to rule out a data problem.
+    """
+    m = monthly_subsample(joined)
+    d = m[np.sign(m["vrp"]) != np.sign(m["hg"])].copy()
+    if {"sw", "iv2_gw"} <= set(d.columns):
+        d["skew_gap"] = d["sw"] - d["iv2_gw"]
+    if {"rv", "rv_gw"} <= set(d.columns):
+        d["rv_gap"] = d["rv_gw"] - d["rv"]
+    cols = [*KEYS, "vrp", "hg", "sw", "iv2_gw", "skew_gap", "rv", "rv_gw", "rv_gap", "n_options", "tau",
+            *DIAGNOSTICS]
+    return d[[c for c in cols if c in d.columns]].reset_index(drop=True)
