@@ -36,7 +36,7 @@ VRP_COLUMNS = ["vrp_diff", "vrp_log", "vrp_swap_return"]
 _KEEP_STRIP = ["underlying", "tau", "snapshot_ts", "n_strikes", "truncation_flag"]
 _KEEP_RV = ["n_5m", "n_daily", "start_gap_s", "end_gap_s"]
 CM_COLUMNS = ["date", "snapshot_ts", "expiry", "tau", "target_days", "expiry1", "expiry2", "tau1", "tau2",
-              "underlying", "extrapolated", *SW_COLUMNS]
+              "underlying", "extrapolated", *SW_COLUMNS, "cm_reason"]
 
 
 def vrp_table(
@@ -78,7 +78,7 @@ def _interpolate(sw1: pd.Series, sw2: pd.Series, tau1: float, tau2: float, tau: 
 
 def constant_maturity(
     strips: pd.DataFrame, target_days: int = 30, min_front_days: int = 8,
-    sw_cols: tuple[str, ...] = SW_COLUMNS,
+    sw_cols: tuple[str, ...] = SW_COLUMNS, max_extrapolation_days: float | None = None,
 ) -> pd.DataFrame:
     """Linear interpolation in total variance between the two expiries bracketing target_days.
 
@@ -86,6 +86,11 @@ def constant_maturity(
     expiries used (`expiry1`, `expiry2`) with their `tau1`, `tau2`, `underlying` of the first valid
     expiry, the interpolated `sw_*` columns and `extrapolated`. Dates with fewer than two valid
     expiries are left out.
+
+    The `sw_*` columns are left NaN, with the reason in `cm_reason`, when the nearest valid expiry is
+    more than `max_extrapolation_days` beyond the snapshot (`extrapolation_too_far`; `None` turns the cap
+    off) or when the extrapolated total variance is not positive (`non_positive_variance`); otherwise
+    `cm_reason` is `ok`. A `sw_*` column that is not positive is NaN on its own.
     """
     tau_t = target_days / 365
     min_tau = min_front_days / 365
@@ -107,6 +112,10 @@ def constant_maturity(
         else:  # every valid expiry is before the target
             a, b = valid.iloc[-2], valid.iloc[-1]
         snap = valid["snapshot_ts"].iloc[0] if "snapshot_ts" in valid else pd.NaT
+        reason = "ok"
+        if (max_extrapolation_days is not None and extrapolated and len(upper)
+                and valid["tau"].iloc[0] * 365 > max_extrapolation_days):
+            reason = "extrapolation_too_far"
         row = {
             "date": date, "snapshot_ts": snap,
             "expiry": snap + pd.Timedelta(days=target_days) if pd.notna(snap) else pd.NaT,
@@ -116,6 +125,13 @@ def constant_maturity(
         }
         for c in cols:
             row[c] = float(_interpolate(pd.Series([a[c]]), pd.Series([b[c]]), a["tau"], b["tau"], tau_t)[0])
+        if reason == "ok" and not row[pivot] > 0:
+            reason = "non_positive_variance"
+        if reason != "ok":
+            row.update({c: np.nan for c in cols})
+        else:  # a bid or ask variant can go non-positive while the mid does not
+            row.update({c: np.nan for c in cols if not row[c] > 0})
+        row["cm_reason"] = reason
         rows.append(row)
     return pd.DataFrame(rows, columns=CM_COLUMNS if not rows else None)
 

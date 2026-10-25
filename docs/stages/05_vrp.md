@@ -122,6 +122,10 @@ against a manual window, gap flags and missing contracts.
   (`SW_T = [SW1 tau1 (tau2 - tau) + SW2 tau2 (tau - tau1)] / ((tau2 - tau1) tau)`). If no pair brackets the
   target (for example every valid expiry is beyond 30 days, late in the month) the same formula
   extrapolates from the two nearest expiries and `extrapolated` is set. A flat swap rate stays flat.
+  The swap rate is left empty (`sw_*` NaN, reason in `cm_reason`) when the nearest valid expiry is more
+  than `strip.max_cm_extrapolation_days` (60) beyond the snapshot (`extrapolation_too_far`) or when the
+  extrapolated total variance is not positive (`non_positive_variance`); otherwise `cm_reason` is `ok`
+  (#55). The row is kept so the lost dates can be counted, and its premium is NaN.
 - `constant_maturity_rv(cm, bars_5m, daily)`: RV over the 30 calendar days after the snapshot, on the
   contract the first valid expiry is written on (decision; the two expiries can sit on different
   contracts). Keyed by (date, expiry = snapshot + 30 days) so `vrp_table(cm, rv)` joins it.

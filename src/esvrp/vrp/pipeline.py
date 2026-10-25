@@ -66,7 +66,8 @@ def run(cfg: Any, data_dir: Path = DATA_DIR, report_dir: Path = REPORT_DIR) -> d
     vrp = vrp_table(strips, rv, "diff", sw_col=sw_col, rv_col=rv_col)
 
     # Constant 30-day maturity, the series comparable to Carr-Wu (Eq. 10).
-    cm = constant_maturity(strips, TARGET_DAYS, cfg.strip.min_front_days)
+    cm = constant_maturity(strips, TARGET_DAYS, cfg.strip.min_front_days,
+                           max_extrapolation_days=cfg.strip.max_cm_extrapolation_days)
     rv_cm = constant_maturity_rv(cm, bars_5m, daily, cfg.realized.max_gap_days)
     vrp_cm = vrp_table(cm, rv_cm, "diff", sw_col=sw_col, rv_col=rv_col) if len(cm) else cm
 
@@ -99,6 +100,9 @@ def run(cfg: Any, data_dir: Path = DATA_DIR, report_dir: Path = REPORT_DIR) -> d
              100 * cfg.strip.max_k0_gap_pct, len(cm),
              int(cm["extrapolated"].sum()) if len(cm) else 0,
              int(vrp_cm["vrp_diff"].notna().sum()) if len(cm) else 0, data_dir)
+    if len(cm):
+        log.info("Stage 5: constant-maturity swap rates by reason: %s",
+                 cm["cm_reason"].value_counts().to_dict())
     for _, row in h1[h1["premium"] == "vrp_diff"].iterrows():
         log.info("H1, %s: mean RV - SW %.5f over %d, t naive %.2f, t HAC(%d) %.2f", row["sample"],
                  row["mean"], row["n"], row["t_naive"], row["hac_lags"], row["t_hac"])
