@@ -18,7 +18,7 @@ The moneyness × maturity × regime table (roadmap 14, `reports/tables/summary.c
 | `reports/tables/strategy.csv` | Risk metrics of the monthly short straddle: per unit vega, dollars and return on margin, each gross and net |
 | `reports/tables/strategy_trades.csv` | One row per monthly trade |
 | `reports/tables/strategy_structures.csv` | The baseline straddle next to strangles at 3%, 5% and 7% out of the money (robustness) |
-| `reports/tables/strategy_margin.csv` | Return on margin at 6%, 8% and 10% of the two legs' notional (sensitivity) |
+| `reports/tables/strategy_margin.csv` | Worst month, CVaR and maximum drawdown in dollars and as a share of margin at 6%, 8% and 10% of the two legs' notional |
 | `reports/tables/strategy_worst_months.csv` | The worst trades, with the market move and the implied vol sold |
 | `reports/figures/h3.png` | VRP against the hedged gain (planned output 5) |
 | `reports/figures/strategy.png` | Cumulative gross and net P&L, and each month's net P&L (planned output 6) |
@@ -106,12 +106,24 @@ month, maximum drawdown of the running sum (from a starting peak of zero) and CV
 The baseline sells the at-the-money straddle. `run_structures` runs the same monthly rule on a strangle:
 sell the out-of-the-money put and call about 5% below and above the forward (`monthly_trades(...,
 "strangle", otm=0.05)`; the legs are the ones closest to ln(1 ± otm) in the chain's log-moneyness, and a
-leg further than 2 log points from its target gives no trade). The strangle collects less premium and is
+leg further than `tolerance` = 0.02 from its target gives no trade; the tolerance is in ln(K/F) units, about
+2% of F, so for a 5% strangle the call target is ln(1.05) = 0.0488 and calls with ln(K/F) between 0.029 and
+0.069 are allowed). The strangle collects less premium and is
 exposed to a move only once it passes the strikes, so it shows whether the result depends on selling the
 at-the-money options. Returns are per unit of entry vega, so the two are comparable even though the
 strangle's vega is smaller. The margin base is the same two legs' notional for both, an assumption.
 `strategy_structures.csv` has one row for the straddle and one per distance, with the number of trades, the
-mean vega sold, gross and net mean, HAC t, Sharpe, skew, worst month and CVaR.
+mean vega sold, gross and net mean, the cost per unit of vega and in dollars, HAC t, Sharpe, skew, worst
+month and CVaR. The cost columns matter for the wider strangles: they sell much less vega but pay the same
+fixed fees and per-rebalance slippage, so their net per-vega result is penalized mostly through costs, not
+through risk.
+
+**Known bias: the legs are hedged separately.** Stage 6 hedges each option on its own, so a straddle or
+strangle is charged slippage and fees on a futures position for each leg, even though a trader would hedge
+only the net delta (the legs' deltas partly cancel). The gross P&L is unaffected, because futures P&L is
+additive; the costs, and so the net P&L, are overstated. Fixing it needs the legs' daily delta paths from
+stage 6 (`hedging/simulator.py`), lined up in time, to cost only the net position's changes; it is tracked
+in #57 (hedge the net delta of the structure) together with #41 (slippage on the change in delta).
 
 `worst_months` lists the worst trades (default five, by net P&L per unit vega) with what happened: the
 market `move` (`F_T / F - 1`, settlement over the entry forward) and the entry implied vol of the two legs.
@@ -123,10 +135,11 @@ costs. P&L is only measured at expiry, so this is a table of months, not of days
 
 The margin fraction (10% of the two legs' futures notional) is an assumption (§4.7) and only enters the
 secondary return-on-margin series; the dollar P&L and the per-vega results do not use it. `margin_sensitivity`
-reruns that series at 6%, 8% and 10% (`strategy_margin.csv`). With one fraction for every trade the series
-is just rescaled by 1/fraction, so **the mean, worst month, CVaR and drawdown move in proportion, while the
-t-statistics, the Sharpe ratio and the skew do not change.** What the table adds is how much of the margin
-the worst month and the maximum drawdown use (a drawdown of -0.5 means half the margin was lost), which is
+reports the losses at 6%, 8% and 10% (`strategy_margin.csv`). With one fraction for every trade the
+return on margin is just the dollar P&L rescaled by 1/fraction, so the mean return, the t-statistics, the
+Sharpe ratio and the skew carry no new information and are not reported. What a fraction changes is how
+large the losses are relative to the margin, so the table gives the worst month, the CVaR and the maximum
+drawdown in dollars and as a share of margin (a drawdown of -0.5 means half the margin was lost), which is
 where a margin call becomes a risk.
 
 For scale, ES futures initial margin for December 2026 read off the CME margins page (by the team; the page

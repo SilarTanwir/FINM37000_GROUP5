@@ -218,34 +218,61 @@ def _trades_with_pnl(net, F=5000.0):
     return pd.DataFrame({"F": F, "net": net, "gross": net})
 
 
-def test_margin_fraction_rescales_levels_but_not_the_ratios():
+def test_margin_table_reports_losses_as_a_share_of_margin_and_nothing_redundant():
     trades = _trades_with_pnl([800.0, 600.0, -1500.0, 400.0, 700.0, -3000.0, 500.0, 900.0])
     s = margin_sensitivity(trades, fractions=(0.06, 0.10))
     lo, hi = s.loc["6%"], s.loc["10%"]
     assert lo["margin_usd"] == pytest.approx(0.06 * 2 * 5000.0 * 50)
-    for level in ("mean_monthly", "annualized", "worst", "cvar", "max_drawdown"):
-        # a smaller margin magnifies returns and losses in proportion
-        assert lo[level] / hi[level] == pytest.approx(0.10 / 0.06)
-    for ratio in ("t_hac", "sharpe", "skew"):
-        assert lo[ratio] == pytest.approx(hi[ratio])  # unchanged by the fraction
-    assert lo["annualized"] == pytest.approx(12 * lo["mean_monthly"]) and lo["n"] == 8
+    for loss in ("worst", "cvar", "max_drawdown"):
+        assert lo[f"{loss}_usd"] == pytest.approx(hi[f"{loss}_usd"])  # dollars do not depend on the margin
+        assert lo[f"{loss}_pct_margin"] / hi[f"{loss}_pct_margin"] == pytest.approx(0.10 / 0.06)
+        assert lo[f"{loss}_pct_margin"] == pytest.approx(lo[f"{loss}_usd"] / lo["margin_usd"])
+    redundant = {"mean_monthly", "annualized", "t_hac", "sharpe", "skew"}
+    assert not redundant & set(s.columns)  # one fraction only rescales these, so they are not reported
 
 
-def test_margin_sensitivity_matches_the_trade_table_at_its_own_fraction():
+def test_margin_table_matches_the_trade_table_at_its_own_fraction():
     g = pd.concat([chain_legs(SEP, "2026-09-01"), chain_legs(OCT, "2026-10-01", F=5140.0)], ignore_index=True)
     res = run_strategy(g, margin_fraction=0.10)
     s = margin_sensitivity(res.trades, fractions=(0.10,))
-    assert s.loc["10%", "mean_monthly"] == pytest.approx(res.metrics.loc["net_return", "mean"])
-    assert s.loc["10%", "worst"] == pytest.approx(res.metrics.loc["net_return", "worst"])
+    assert s.loc["10%", "worst_pct_margin"] == pytest.approx(res.metrics.loc["net_return", "worst"])
+    drawdown = res.metrics.loc["net_return", "max_drawdown"]
+    assert s.loc["10%", "max_drawdown_pct_margin"] == pytest.approx(drawdown)
 
 
-def test_margin_sensitivity_shows_how_much_of_the_margin_a_drawdown_uses():
+def test_margin_table_shows_how_much_of_the_margin_a_drawdown_uses():
     trades = _trades_with_pnl([-12000.0, 3000.0, -9000.0])  # margin at 6% is $30,000
     s = margin_sensitivity(trades, fractions=(0.06, 0.10))
-    assert s.loc["6%", "max_drawdown"] == pytest.approx(-18000.0 / 30000.0)  # peak 0 down to -18,000
-    assert s.loc["10%", "max_drawdown"] == pytest.approx(-18000.0 / 50000.0)
+    assert s.loc["6%", "max_drawdown_usd"] == pytest.approx(-18000.0)  # peak 0 down to -18,000
+    assert s.loc["6%", "max_drawdown_pct_margin"] == pytest.approx(-18000.0 / 30000.0)
+    assert s.loc["10%", "max_drawdown_pct_margin"] == pytest.approx(-18000.0 / 50000.0)
+    assert s.loc["6%", "worst_pct_margin"] == pytest.approx(-12000.0 / 30000.0)
 
 
-def test_margin_sensitivity_with_no_trades():
+def test_margin_table_with_no_trades():
     s = margin_sensitivity(pd.DataFrame(columns=["F", "net"]))
     assert list(s.index) == ["6%", "8%", "10%"] and (s["n"] == 0).all()
+
+
+# --- units of the strangle tolerance, and the cost columns of the structure table ----------------------
+
+def test_tolerance_is_in_log_moneyness_units():
+    """0.02 in ln(K/F): about 2% of F. The 5% call target is ln(1.05) = 0.0488."""
+    # ln(5150/5000) = 0.0296 and ln(5200/5000) = 0.0392, against a target of ln(1.05) = 0.0488
+    g = chain_legs(strikes=(4750.0, 4900.0, 5000.0, 5150.0, 5200.0))
+    near = monthly_trades(g, "strangle", otm=0.05, tolerance=0.02)  # |0.0296 - 0.0488| = 0.0192 <= 0.02
+    assert len(near) == 1 and near.iloc[0]["strike_call"] == 5200.0  # nearer to the target than 5150
+    assert monthly_trades(g, "strangle", otm=0.05, tolerance=0.005).empty  # 0.0392 is 0.0096 away: too far
+    assert len(monthly_trades(g, "strangle", otm=0.05, tolerance=0.0096 + 1e-9)) == 1
+
+
+def test_run_structures_shows_how_much_of_the_result_is_costs():
+    lossless = {(k, cp): 0.0 for k in (4750.0, 5000.0, 5250.0) for cp in ("c", "p")}
+    g = chain_legs(SEP, "2026-09-01", gains_by_strike=lossless)  # zero gains, so the result is only costs
+    s = run_structures(g, otms=(0.05,))
+    straddle, strangle = s.loc["straddle (ATM)"], s.loc["strangle (5% OTM)"]
+    assert straddle["cost_usd"] == pytest.approx(60.0) and strangle["cost_usd"] == pytest.approx(60.0)
+    assert straddle["cost_per_vega"] == pytest.approx(60.0 / (600.0 * 50 * 0.01))
+    assert strangle["cost_per_vega"] == pytest.approx(60.0 / (240.0 * 50 * 0.01))
+    assert strangle["cost_per_vega"] > straddle["cost_per_vega"]  # the same fixed costs on less vega
+    assert straddle["cost_per_vega"] == pytest.approx(straddle["gross_mean"] - straddle["net_mean"])

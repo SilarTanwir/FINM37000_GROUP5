@@ -14,6 +14,12 @@ and is less exposed to a move near the strikes, so it shows whether the result d
 at-the-money options (`run_structures`). `worst_months` lists the worst trades with the market move
 behind each.
 
+Known bias: stage 6 hedges each option on its own, so a straddle or strangle is charged slippage and fees
+on a futures position for each leg, even though a trader would hedge only the net delta (the legs' deltas
+partly cancel). The gross P&L is unaffected (futures P&L is additive); the costs, and so the net P&L, are
+overstated. Fixing it needs the legs' daily delta paths from stage 6; see #57 (net-delta hedging)
+and #41 (slippage on the change in delta).
+
 Returns (decided, §4.7 and §15.5):
 - per unit of entry vega, primary: P&L divided by the straddle's dollar vega per vol point, so about
   implied minus realized volatility in vol points for the seller, comparable across months;
@@ -74,8 +80,10 @@ def _pick_strangle(day: pd.DataFrame, otm: float, tolerance: float) -> tuple[pd.
     """The out-of-the-money call and put closest to `otm` (a share of F) above and below the forward.
 
     Targets are log-moneyness ln(1 + otm) for the call and ln(1 - otm) for the put, the same
-    coordinates as the chain's `moneyness`. A leg further than `tolerance` (log points) from its target
-    is not used, so a sparse chain gives no trade, not a different trade.
+    coordinates as the chain's `moneyness`. `tolerance` is in the same units, ln(K/F): 0.02 means a leg
+    whose log-moneyness is more than 0.02 (about 2% of F) from its target is not used. For a 5% strangle
+    the call target is ln(1.05) = 0.0488, so calls with ln(K/F) between 0.029 and 0.069 are allowed.
+    A sparse chain therefore gives no trade, not a different trade.
     """
     calls = day[(day["cp"] == "c") & (day["moneyness"] > 0)]
     puts = day[(day["cp"] == "p") & (day["moneyness"] < 0)]
@@ -93,7 +101,8 @@ def monthly_trades(hedged_gains: pd.DataFrame, structure: str = "straddle", hedg
     """One short structure per end-of-month expiry, entered on the first snapshot of its month.
 
     - `straddle`: the strike closest to the forward `F` that has both a call and a put.
-    - `strangle`: the out-of-the-money call and put about `otm` (5%) above and below `F`
+    - `strangle`: the out-of-the-money call and put about `otm` (5% of F) above and below `F`. `tolerance`
+      is in ln(K/F) units (0.02, about 2% of F): a leg further than that from its target gives no trade
       (see `_pick_strangle`).
 
     P&L is in dollars for one structure (one call and one put): `gross` at mid, `net` after
@@ -207,6 +216,10 @@ def run_structures(hedged_gains: pd.DataFrame, hedge_delta: str = "iv_daily", ma
     One row per structure (the straddle, then a strangle at each `otm`), net and gross per unit vega:
     number of trades, mean, HAC t, Sharpe, skew, worst month and CVaR. If the strangles tell the same story
     as the straddle, the result does not hinge on selling the at-the-money options.
+
+    `cost_per_vega` (gross minus net, per unit of vega) and `cost_usd` show how much of each structure's
+    result is costs: a wide strangle sells much less vega but pays the same fixed fees and per-rebalance
+    slippage, so its net per-vega result is penalized mostly through costs, not through risk.
     """
     variants = [("straddle", None), *(("strangle", o) for o in otms)]
     rows = {}
@@ -216,10 +229,13 @@ def run_structures(hedged_gains: pd.DataFrame, hedge_delta: str = "iv_daily", ma
         label = "straddle (ATM)" if o is None else f"strangle ({o:.0%} OTM)"
         net, gross = res.metrics.loc["net_per_vega"], res.metrics.loc["gross_per_vega"]
         cvar = next((c for c in res.metrics.columns if str(c).startswith("cvar_")), None)
+        tr = res.trades
         rows[label] = {
             "n": net.get("n", 0),
-            "mean_vega_collected": res.trades["vega"].mean() if len(res.trades) else np.nan,
+            "mean_vega_collected": tr["vega"].mean() if len(tr) else np.nan,
             "gross_mean": gross.get("mean", np.nan), "net_mean": net.get("mean", np.nan),
+            "cost_per_vega": (tr["cost"] / tr["vega"]).mean() if len(tr) else np.nan,
+            "cost_usd": tr["cost"].mean() if len(tr) else np.nan,
             "net_t_hac": net.get("t_hac", np.nan), "net_sharpe": net.get("sharpe", np.nan),
             "net_skew": net.get("skew", np.nan), "net_worst": net.get("worst", np.nan),
             "net_cvar": net.get(cvar, np.nan) if cvar else np.nan,
@@ -229,28 +245,31 @@ def run_structures(hedged_gains: pd.DataFrame, hedge_delta: str = "iv_daily", ma
 
 def margin_sensitivity(trades: pd.DataFrame, fractions: tuple[float, ...] = (0.06, 0.08, 0.10),
                        cvar_level: float = 0.05) -> pd.DataFrame:
-    """Return on margin at several margin fractions, one row per fraction.
+    """How much of the margin the worst month, the CVaR and the maximum drawdown use, per margin fraction.
 
-    The margin base of a trade is `fraction x 2 legs x F x $50` (an assumption, §4.7). With one fraction
-    for every trade, the return on margin is the dollar P&L divided by a number that scales with F, so a
-    different fraction rescales the whole series by 1/fraction: the mean, the worst month, the drawdown and
-    the CVaR move in proportion, while the t-statistics, the Sharpe ratio and the skew do not change at
-    all (to the extent F is similar across trades). The informative columns are therefore the loss
-    measures: `max_drawdown` and `worst` are shares of margin, so a value of -0.5 means half the margin
-    was lost, which is where a margin call becomes a real risk. `margin_usd` is the average margin base
-    per straddle in dollars.
+    The margin base of a trade is `fraction x 2 legs x F x $50` (an assumption, §4.7). The dollar P&L does
+    not depend on it. With one fraction for every trade, the return on margin is the dollar P&L divided by
+    a number that scales with F, so a different fraction rescales the whole series by 1/fraction: the mean
+    return, the t-statistics, the Sharpe ratio and the skew carry no new information, and they are left
+    out. What a fraction changes is how large the losses are *relative to the margin*, and that is what
+    this table reports: `worst_pct_margin`, `cvar_pct_margin` and `max_drawdown_pct_margin` (-0.5 means
+    half the margin was lost, where a margin call becomes a real risk), next to the same losses in dollars
+    and the average margin base `margin_usd` per structure.
     """
+    dollars = risk_metrics(trades["net"], cvar_level=cvar_level) if len(trades) else {}
+    cvar_key = next((k for k in dollars if str(k).startswith("cvar_")), None)
     rows = {}
     for f in fractions:
         if trades.empty:
             rows[f"{f:.0%}"] = {"fraction": f, "n": 0}
             continue
         margin = f * 2 * trades["F"] * ES_MULTIPLIER
-        m = risk_metrics(trades["net"] / margin, cvar_level=cvar_level)
-        cvar = next((k for k in m if str(k).startswith("cvar_")), None)
+        pct = risk_metrics(trades["net"] / margin, cvar_level=cvar_level)
         rows[f"{f:.0%}"] = {
-            "fraction": f, "margin_usd": float(margin.mean()), "n": m["n"], "mean_monthly": m["mean"],
-            "annualized": m["mean"] * 12, "t_hac": m["t_hac"], "sharpe": m["sharpe"], "skew": m["skew"],
-            "worst": m["worst"], "cvar": m[cvar] if cvar else float("nan"), "max_drawdown": m["max_drawdown"],
+            "fraction": f, "n": pct["n"], "margin_usd": float(margin.mean()),
+            "worst_usd": dollars["worst"], "cvar_usd": dollars[cvar_key] if cvar_key else float("nan"),
+            "max_drawdown_usd": dollars["max_drawdown"],
+            "worst_pct_margin": pct["worst"], "cvar_pct_margin": pct[cvar_key] if cvar_key else float("nan"),
+            "max_drawdown_pct_margin": pct["max_drawdown"],
         }
     return pd.DataFrame(rows).T
