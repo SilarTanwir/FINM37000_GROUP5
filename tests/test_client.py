@@ -169,3 +169,31 @@ def test_broken_download_is_retried(tmp_path, monkeypatch):
 
     client.timeseries.get_range = flaky_get_range
     assert len(fetch(**ARGS, budget_usd=10, cache_dir=tmp_path, client=client)) == 2
+
+
+def test_interrupted_write_does_not_poison_the_cache(tmp_path, monkeypatch):
+    """A write that dies halfway leaves no cache file, so the next call pulls again (#30)."""
+    def partial_write(self, path, *a, **kw):
+        open(path, "wb").write(b"PAR1 truncated")
+        raise KeyboardInterrupt
+
+    with monkeypatch.context() as m:
+        m.setattr(pd.DataFrame, "to_parquet", partial_write)
+        with pytest.raises(KeyboardInterrupt):
+            fetch(**ARGS, budget_usd=10, cache_dir=tmp_path, client=FakeClient())
+    assert list(tmp_path.iterdir()) == []  # no data file, no sidecar, no temp file left
+    client = FakeClient()
+    assert len(fetch(**ARGS, budget_usd=10, cache_dir=tmp_path, client=client)) == 2
+    assert [c[0] for c in client.calls] == ["get_cost", "get_range"]
+
+
+def test_unreadable_cache_file_is_a_miss(tmp_path, caplog):
+    """A partial file from an older, non-atomic write is pulled again and replaced."""
+    path = tmp_path / f"{cache_key(request_params(**ARGS))}.parquet"
+    path.write_bytes(b"not a parquet file")
+    client = FakeClient()
+    with caplog.at_level(logging.WARNING):
+        assert len(fetch(**ARGS, budget_usd=10, cache_dir=tmp_path, client=client)) == 2
+    assert "Unreadable cache file" in caplog.text
+    assert [c[0] for c in client.calls] == ["get_cost", "get_range"]
+    assert len(pd.read_parquet(path)) == 2

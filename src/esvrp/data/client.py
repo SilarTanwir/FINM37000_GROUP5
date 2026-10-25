@@ -140,9 +140,10 @@ def fetch(
     data_path = Path(cache_dir) / f"{key}.parquet"
     meta_path = Path(cache_dir) / f"{key}.json"
 
-    if data_path.exists():
+    cached = _read_cache(data_path)
+    if cached is not None:
         log.info("Cache hit %s for %s", data_path.name, params)
-        return pd.read_parquet(data_path)
+        return cached
 
     client = client or make_client()
     cost = estimate_cost(dataset, schema, symbols, start, end, stype_in, client=client)
@@ -153,7 +154,34 @@ def fetch(
 
     df = _with_retries(client.timeseries.get_range, **params).to_df()
     data_path.parent.mkdir(parents=True, exist_ok=True)
-    df.to_parquet(data_path)
-    meta_path.write_text(json.dumps({**params, "estimated_cost_usd": cost, "rows": len(df)}, indent=2))
+    _atomic_write(data_path, df.to_parquet)
+    meta = json.dumps({**params, "estimated_cost_usd": cost, "rows": len(df)}, indent=2)
+    _atomic_write(meta_path, lambda tmp: Path(tmp).write_text(meta))
     log.info("Pulled %d rows into %s", len(df), data_path.name)
     return df
+
+
+def _atomic_write(path: Path, write: Any) -> None:
+    """Write through a temporary file in the same folder, then rename it into place.
+
+    The rename is atomic on one file system, so an interrupted write (a crash, Ctrl-C, a full disk) leaves
+    either the old file or no file, never a partial one that a later run would read as a cache hit.
+    """
+    tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    try:
+        write(tmp)
+        os.replace(tmp, path)
+    finally:
+        tmp.unlink(missing_ok=True)
+
+
+def _read_cache(path: Path) -> pd.DataFrame | None:
+    """The cached DataFrame, or None if there is no file or it cannot be read (then it is pulled again)."""
+    if not path.exists():
+        return None
+    try:
+        return pd.read_parquet(path)
+    except Exception as err:  # a file left by an older, non-atomic write; treat as a miss
+        log.warning("Unreadable cache file %s (%s); pulling again", path.name, err)
+        path.unlink(missing_ok=True)
+        return None

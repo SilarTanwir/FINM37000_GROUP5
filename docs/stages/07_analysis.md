@@ -17,6 +17,9 @@ The moneyness × maturity × regime table (roadmap 14, `reports/tables/summary.c
 | `reports/tables/h3.csv` | H3 statistics for every chain and for the non-overlapping monthly subsample |
 | `reports/tables/strategy.csv` | Risk metrics of the monthly short straddle: per unit vega, dollars and return on margin, each gross and net |
 | `reports/tables/strategy_trades.csv` | One row per monthly trade |
+| `reports/tables/strategy_structures.csv` | The baseline straddle next to strangles at 3%, 5% and 7% out of the money (robustness) |
+| `reports/tables/strategy_margin.csv` | Worst month, CVaR and maximum drawdown in dollars and as a share of margin at 6%, 8% and 10% of the two legs' notional |
+| `reports/tables/strategy_worst_months.csv` | The worst trades, with the market move and the implied vol sold |
 | `reports/figures/h3.png` | VRP against the hedged gain (planned output 5) |
 | `reports/figures/strategy.png` | Cumulative gross and net P&L, and each month's net P&L (planned output 6) |
 
@@ -98,8 +101,55 @@ t-statistics, annualized Sharpe (`× sqrt(12)`), skew, share of winning months, 
 month, maximum drawdown of the running sum (from a starting peak of zero) and CVaR, the mean of the worst
 5% of months (at least one month, so with 36 trades it is the worst month).
 
-Not covered: worst day (P&L is only measured at expiry, not marked daily), the strangle variant (roadmap
-17), and option spreads by moneyness bucket from the `mbp-1` sample (roadmap 13); the entry half-spread is
+### Strangle as robustness, and the worst months
+
+The baseline sells the at-the-money straddle. `run_structures` runs the same monthly rule on a strangle:
+sell the out-of-the-money put and call about 5% below and above the forward (`monthly_trades(...,
+"strangle", otm=0.05)`; the legs are the ones closest to ln(1 ± otm) in the chain's log-moneyness, and a
+leg further than `tolerance` = 0.02 from its target gives no trade; the tolerance is in ln(K/F) units, about
+2% of F, so for a 5% strangle the call target is ln(1.05) = 0.0488 and calls with ln(K/F) between 0.029 and
+0.069 are allowed). The strangle collects less premium and is
+exposed to a move only once it passes the strikes, so it shows whether the result depends on selling the
+at-the-money options. Returns are per unit of entry vega, so the two are comparable even though the
+strangle's vega is smaller. The margin base is the same two legs' notional for both, an assumption.
+`strategy_structures.csv` has one row for the straddle and one per distance, with the number of trades, the
+mean vega sold, gross and net mean, the cost per unit of vega and in dollars, HAC t, Sharpe, skew, worst
+month and CVaR. The cost columns matter for the wider strangles: they sell much less vega but pay the same
+fixed fees and per-rebalance slippage, so their net per-vega result is penalized mostly through costs, not
+through risk.
+
+**Known bias: the legs are hedged separately.** Stage 6 hedges each option on its own, so a straddle or
+strangle is charged slippage and fees on a futures position for each leg, even though a trader would hedge
+only the net delta (the legs' deltas partly cancel). The gross P&L is unaffected, because futures P&L is
+additive; the costs, and so the net P&L, are overstated. Fixing it needs the legs' daily delta paths from
+stage 6 (`hedging/simulator.py`), lined up in time, to cost only the net position's changes; it is tracked
+in #57 (hedge the net delta of the structure) together with #41 (slippage on the change in delta).
+
+`worst_months` lists the worst trades (default five, by net P&L per unit vega) with what happened: the
+market `move` (`F_T / F - 1`, settlement over the entry forward) and the entry implied vol of the two legs.
+A short option position loses when the futures finish far from where they started, more than the premium
+collected, so the table shows which months were a large move against a low implied vol and which were just
+costs. P&L is only measured at expiry, so this is a table of months, not of days.
+
+### Sensitivity to the margin assumption
+
+The margin fraction (10% of the two legs' futures notional) is an assumption (§4.7) and only enters the
+secondary return-on-margin series; the dollar P&L and the per-vega results do not use it. `margin_sensitivity`
+reports the losses at 6%, 8% and 10% (`strategy_margin.csv`). With one fraction for every trade the
+return on margin is just the dollar P&L rescaled by 1/fraction, so the mean return, the t-statistics, the
+Sharpe ratio and the skew carry no new information and are not reported. What a fraction changes is how
+large the losses are relative to the margin, so the table gives the worst month, the CVaR and the maximum
+drawdown in dollars and as a share of margin (a drawdown of -0.5 means half the margin was lost), which is
+where a margin call becomes a risk.
+
+For scale, ES futures initial margin for December 2026 read off the CME margins page (by the team; the page
+blocks automated access): $26,121 long and $23,290 short per contract at a price of 7,729.75, a notional of
+$386,487.50, so 6.8% and 6.0% of one contract's notional. 6% of the two legs' notional ($46,380) is about
+two short futures margins, 8% about 2.7 and 10% about 3.3. A short straddle probably needs about one to two
+futures margins (an inference; SPAN margins the worst one-day loss of the whole position), so the three
+fractions are on the conservative side. Rates change with volatility, so record the date with the figures.
+
+Not covered: worst day (P&L is only measured at expiry, not marked daily), and option spreads by moneyness bucket from the `mbp-1` sample (roadmap 13); the entry half-spread is
 taken from each quote's own bid and ask.
 
 ## Checks
@@ -111,6 +161,8 @@ taken from each quote's own bid and ask.
 - `test_strategy`: one trade a month on the first snapshot, at the money, with both legs; short P&L, costs
   and every normalization by hand; cost multiplier; risk metrics by hand, including drawdown from the
   start.
+- `test_strategy` also covers the strangle: legs nearest 5% out of the money, other distances, the
+  tolerance, missing sides, the strike columns for each structure, `run_structures` and `worst_months`.
 - `test_stage7`: the stage on simulated chains writes every table and figure; figures with no data; the
   stage runner and the `doit` graph.
 

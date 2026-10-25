@@ -16,6 +16,7 @@ cleaning:
   min_range_pct: 0.10
   drop_zero_bid: true
   drop_crossed: true
+  drop_locked: true
   backfill_minutes: 15         # look-back for strikes not quoted at the snapshot minute
 quality:                       # chain-level checks after cleaning (docs/stages/02_snapshots.md)
   action: flag                 # flag | reject (reject drops the failing chains before stage 4 builds them)

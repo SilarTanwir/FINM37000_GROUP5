@@ -8,6 +8,18 @@ overlap. The legs come from the stage 6 hedged gains (daily futures hedge, settl
 the short position earns minus the long gain. Selling at the bid is the mid gain less the half-spread,
 which is part of each leg's `cost` along with hedge slippage and fees.
 
+The baseline is the at-the-money straddle. As a robustness check the same monthly rule is run on a
+strangle (sell an out-of-the-money put and call, 5% from the forward by default): it earns less premium
+and is less exposed to a move near the strikes, so it shows whether the result depends on selling the
+at-the-money options (`run_structures`). `worst_months` lists the worst trades with the market move
+behind each.
+
+Known bias: stage 6 hedges each option on its own, so a straddle or strangle is charged slippage and fees
+on a futures position for each leg, even though a trader would hedge only the net delta (the legs' deltas
+partly cancel). The gross P&L is unaffected (futures P&L is additive); the costs, and so the net P&L, are
+overstated. Fixing it needs the legs' daily delta paths from stage 6; see #57 (net-delta hedging)
+and #41 (slippage on the change in delta).
+
 Returns (decided, §4.7 and §15.5):
 - per unit of entry vega, primary: P&L divided by the straddle's dollar vega per vol point, so about
   implied minus realized volatility in vol points for the seller, comparable across months;
@@ -26,60 +38,133 @@ from esvrp.analysis.inference import mean_with_se
 from esvrp.hedging.costs import ES_MULTIPLIER
 
 TZ = "America/Chicago"
-TRADE_COLUMNS = ["date", "expiry", "underlying", "strike", "F", "moneyness", "days", "iv_call", "iv_put",
+STRUCTURES = ("straddle", "strangle")
+TRADE_COLUMNS = ["date", "expiry", "underlying", "structure", "strike", "strike_call", "strike_put", "F",
+                 "F_T", "move", "moneyness", "moneyness_call", "moneyness_put", "days", "iv_call", "iv_put",
                  "vega", "gross", "cost", "net", "gross_per_vega", "net_per_vega", "margin", "gross_return",
                  "net_return"]
+WORST_COLUMNS = ["rank", "date", "expiry", "structure", "net_per_vega", "net", "gross", "cost", "move",
+                 "iv_entry", "days"]
 
 
 @dataclass
 class StrategyResult:
     trades: pd.DataFrame = field(default_factory=pd.DataFrame)  # one row per monthly trade
     metrics: pd.DataFrame = field(default_factory=pd.DataFrame)  # rows: series, columns: risk metrics
+    worst: pd.DataFrame = field(default_factory=pd.DataFrame)  # the worst months, with the move behind each
 
 
-def monthly_straddles(hedged_gains: pd.DataFrame, hedge_delta: str = "iv_daily",
-                      margin_fraction: float = 0.10, cost_multiplier: float = 1.0) -> pd.DataFrame:
-    """One short ATM straddle per end-of-month expiry, entered on the first snapshot of its month.
-
-    The strike is the one closest to the forward `F` that has both a call and a put that day. P&L is in
-    dollars for one straddle (one call and one put): `gross` at mid, `net` after `cost_multiplier` times
-    the legs' costs. `vega` is the straddle's dollar vega per vol point at entry.
-    """
+def _entry_legs(hedged_gains: pd.DataFrame, hedge_delta: str) -> pd.DataFrame:
+    """The legs available on each end-of-month expiry's entry date (first snapshot of the expiry's month)."""
     g = hedged_gains[hedged_gains["hedge_delta"] == hedge_delta]
     if g.empty:
-        return pd.DataFrame(columns=TRADE_COLUMNS)
+        return g
     g = g.assign(month=pd.to_datetime(g["date"]).dt.to_period("M"),
                  expiry_month=pd.to_datetime(g["expiry"], utc=True).dt.tz_convert(TZ).dt.tz_localize(None)
                  .dt.to_period("M"))
     g = g[g["month"] == g["expiry_month"]]
-    g = g[g["date"] == g.groupby("expiry")["date"].transform("min")]
+    return g[g["date"] == g.groupby("expiry")["date"].transform("min")]
 
-    legs = g.pivot_table(index=["date", "expiry", "strike"], columns="cp",
-                         values=["gain", "cost", "vega", "iv", "F", "moneyness", "underlying", "tau"],
-                         aggfunc="first")
-    if not {"c", "p"} <= set(legs["gain"].columns):
-        return pd.DataFrame(columns=TRADE_COLUMNS)
-    legs = legs[legs["gain"].notna().all(axis=1)]  # both a call and a put at that strike
-    if legs.empty:
-        return pd.DataFrame(columns=TRADE_COLUMNS)
-    legs["abs_m"] = legs[("moneyness", "c")].astype(float).abs()
-    atm = legs.loc[legs.groupby(level="expiry")["abs_m"].idxmin()]
 
-    t = pd.DataFrame({
-        "date": atm.index.get_level_values("date"), "expiry": atm.index.get_level_values("expiry"),
-        "underlying": atm[("underlying", "c")].to_numpy(), "strike": atm.index.get_level_values("strike"),
-        "F": atm[("F", "c")].to_numpy(float), "moneyness": atm[("moneyness", "c")].to_numpy(float),
-        "days": atm[("tau", "c")].to_numpy(float) * 365,
-        "iv_call": atm[("iv", "c")].to_numpy(float), "iv_put": atm[("iv", "p")].to_numpy(float),
-        "vega": (atm[("vega", "c")] + atm[("vega", "p")]).to_numpy(float) * ES_MULTIPLIER * 0.01,
-        "gross": -(atm[("gain", "c")] + atm[("gain", "p")]).to_numpy(float),
-        "cost": cost_multiplier * (atm[("cost", "c")] + atm[("cost", "p")]).to_numpy(float),
-    })
-    t["net"] = t["gross"] - t["cost"]
-    t["gross_per_vega"], t["net_per_vega"] = t["gross"] / t["vega"], t["net"] / t["vega"]
-    t["margin"] = margin_fraction * 2 * t["F"] * ES_MULTIPLIER
-    t["gross_return"], t["net_return"] = t["gross"] / t["margin"], t["net"] / t["margin"]
-    return t.sort_values("date").reset_index(drop=True)[TRADE_COLUMNS]
+def _pick_straddle(day: pd.DataFrame) -> tuple[pd.Series, pd.Series] | None:
+    """The strike closest to the forward that has both a call and a put."""
+    calls, puts = day[day["cp"] == "c"].set_index("strike"), day[day["cp"] == "p"].set_index("strike")
+    common = calls.index.intersection(puts.index)
+    if common.empty:
+        return None
+    k = min(common, key=lambda s: abs(float(calls.loc[s, "moneyness"])))
+    return calls.loc[k].rename(k), puts.loc[k].rename(k)
+
+
+def _pick_strangle(day: pd.DataFrame, otm: float, tolerance: float) -> tuple[pd.Series, pd.Series] | None:
+    """The out-of-the-money call and put closest to `otm` (a share of F) above and below the forward.
+
+    Targets are log-moneyness ln(1 + otm) for the call and ln(1 - otm) for the put, the same
+    coordinates as the chain's `moneyness`. `tolerance` is in the same units, ln(K/F): 0.02 means a leg
+    whose log-moneyness is more than 0.02 (about 2% of F) from its target is not used. For a 5% strangle
+    the call target is ln(1.05) = 0.0488, so calls with ln(K/F) between 0.029 and 0.069 are allowed.
+    A sparse chain therefore gives no trade, not a different trade.
+    """
+    calls = day[(day["cp"] == "c") & (day["moneyness"] > 0)]
+    puts = day[(day["cp"] == "p") & (day["moneyness"] < 0)]
+    if calls.empty or puts.empty:
+        return None
+    dc, dp = (calls["moneyness"] - np.log1p(otm)).abs(), (puts["moneyness"] - np.log1p(-otm)).abs()
+    if dc.min() > tolerance or dp.min() > tolerance:
+        return None
+    return calls.loc[dc.idxmin()], puts.loc[dp.idxmin()]
+
+
+def monthly_trades(hedged_gains: pd.DataFrame, structure: str = "straddle", hedge_delta: str = "iv_daily",
+                   margin_fraction: float = 0.10, cost_multiplier: float = 1.0, otm: float = 0.05,
+                   tolerance: float = 0.02) -> pd.DataFrame:
+    """One short structure per end-of-month expiry, entered on the first snapshot of its month.
+
+    - `straddle`: the strike closest to the forward `F` that has both a call and a put.
+    - `strangle`: the out-of-the-money call and put about `otm` (5% of F) above and below `F`. `tolerance`
+      is in ln(K/F) units (0.02, about 2% of F): a leg further than that from its target gives no trade
+      (see `_pick_strangle`).
+
+    P&L is in dollars for one structure (one call and one put): `gross` at mid, `net` after
+    `cost_multiplier` times the legs' costs. `vega` is the structure's dollar vega per vol point at entry,
+    `F_T` the futures settlement at expiry and `move = F_T / F - 1` the market move it had to survive.
+    The margin base is two legs' futures notional (an assumption, as before), for both structures.
+    """
+    if structure not in STRUCTURES:
+        raise ValueError(f"structure must be one of {STRUCTURES}, got {structure!r}")
+    g = _entry_legs(hedged_gains, hedge_delta)
+    if g.empty:
+        return pd.DataFrame(columns=TRADE_COLUMNS)
+    rows = []
+    for (_, _), day in g.groupby(["date", "expiry"], sort=True):
+        pair = _pick_straddle(day) if structure == "straddle" else _pick_strangle(day, otm, tolerance)
+        if pair is None:
+            continue
+        c, p = pair
+        gross = -(float(c["gain"]) + float(p["gain"]))
+        cost = cost_multiplier * (float(c["cost"]) + float(p["cost"]))
+        vega = (float(c["vega"]) + float(p["vega"])) * ES_MULTIPLIER * 0.01
+        F = float(c["F"])
+        F_T = float(c["F_T"]) if "F_T" in c and pd.notna(c["F_T"]) else float("nan")
+        same = structure == "straddle"
+        k_call = float(c["strike"]) if "strike" in c else float(c.name)  # straddle rows: strike is the index
+        k_put = float(p["strike"]) if "strike" in p else float(p.name)
+        margin = margin_fraction * 2 * F * ES_MULTIPLIER
+        rows.append({
+            "date": c["date"], "expiry": c["expiry"], "underlying": c["underlying"], "structure": structure,
+            "strike": k_call if same else float("nan"), "strike_call": k_call, "strike_put": k_put,
+            "F": F, "F_T": F_T, "move": F_T / F - 1,
+            "moneyness": float(c["moneyness"]) if same else float("nan"),
+            "moneyness_call": float(c["moneyness"]), "moneyness_put": float(p["moneyness"]),
+            "days": float(c["tau"]) * 365, "iv_call": float(c["iv"]), "iv_put": float(p["iv"]), "vega": vega,
+            "gross": gross, "cost": cost, "net": gross - cost, "gross_per_vega": gross / vega,
+            "net_per_vega": (gross - cost) / vega, "margin": margin, "gross_return": gross / margin,
+            "net_return": (gross - cost) / margin,
+        })
+    if not rows:
+        return pd.DataFrame(columns=TRADE_COLUMNS)
+    return pd.DataFrame(rows).sort_values("date").reset_index(drop=True)[TRADE_COLUMNS]
+
+
+def monthly_straddles(hedged_gains: pd.DataFrame, hedge_delta: str = "iv_daily",
+                      margin_fraction: float = 0.10, cost_multiplier: float = 1.0) -> pd.DataFrame:
+    """The baseline: one short ATM straddle per end-of-month expiry (see `monthly_trades`)."""
+    return monthly_trades(hedged_gains, "straddle", hedge_delta, margin_fraction, cost_multiplier)
+
+
+def worst_months(trades: pd.DataFrame, n: int = 5, col: str = "net_per_vega") -> pd.DataFrame:
+    """The `n` worst trades by `col`, with what happened: the market move and the implied vol sold.
+
+    A short straddle or strangle loses when the futures settle far from where they started, more than
+    the premium collected, so each row shows `move` (`F_T / F - 1`) next to `iv_entry` (the average
+    implied vol of the two legs). `net`, `gross` and `cost` are in dollars for one structure.
+    """
+    if trades.empty or col not in trades:
+        return pd.DataFrame(columns=WORST_COLUMNS)
+    w = trades.dropna(subset=[col]).nsmallest(n, col).copy()
+    w["iv_entry"] = (w["iv_call"] + w["iv_put"]) / 2
+    w.insert(0, "rank", range(1, len(w) + 1))
+    return w[WORST_COLUMNS].reset_index(drop=True)
 
 
 def risk_metrics(x: pd.Series, periods_per_year: int = 12, cvar_level: float = 0.05,
@@ -111,12 +196,80 @@ def risk_metrics(x: pd.Series, periods_per_year: int = 12, cvar_level: float = 0
 
 
 def run_strategy(hedged_gains: pd.DataFrame, hedge_delta: str = "iv_daily", margin_fraction: float = 0.10,
-                 cost_multiplier: float = 1.0, cvar_level: float = 0.05) -> StrategyResult:
-    """Sell one hedged ATM straddle monthly at the bid, charge all costs, report tails."""
+                 cost_multiplier: float = 1.0, cvar_level: float = 0.05, structure: str = "straddle",
+                 otm: float = 0.05, n_worst: int = 5) -> StrategyResult:
+    """Sell one hedged ATM straddle (or strangle) monthly at the bid, charge all costs, report tails."""
     # Decided (§4.7, §15.5): entry vega primary; assumed margin fraction secondary.
-    trades = monthly_straddles(hedged_gains, hedge_delta, margin_fraction, cost_multiplier)
+    trades = monthly_trades(hedged_gains, structure, hedge_delta, margin_fraction, cost_multiplier, otm)
     series = {"gross_per_vega": "vol points", "net_per_vega": "vol points", "gross": "dollars",
               "net": "dollars", "gross_return": "return on margin", "net_return": "return on margin"}
     metrics = pd.DataFrame({name: risk_metrics(trades[name], cvar_level=cvar_level) for name in series}).T
     metrics.insert(0, "units", pd.Series(series))
-    return StrategyResult(trades=trades, metrics=metrics)
+    return StrategyResult(trades=trades, metrics=metrics, worst=worst_months(trades, n_worst))
+
+
+def run_structures(hedged_gains: pd.DataFrame, hedge_delta: str = "iv_daily", margin_fraction: float = 0.10,
+                   cost_multiplier: float = 1.0, cvar_level: float = 0.05,
+                   otms: tuple[float, ...] = (0.03, 0.05, 0.07)) -> pd.DataFrame:
+    """Baseline straddle next to strangles at several distances: the robustness table.
+
+    One row per structure (the straddle, then a strangle at each `otm`), net and gross per unit vega:
+    number of trades, mean, HAC t, Sharpe, skew, worst month and CVaR. If the strangles tell the same story
+    as the straddle, the result does not hinge on selling the at-the-money options.
+
+    `cost_per_vega` (gross minus net, per unit of vega) and `cost_usd` show how much of each structure's
+    result is costs: a wide strangle sells much less vega but pays the same fixed fees and per-rebalance
+    slippage, so its net per-vega result is penalized mostly through costs, not through risk.
+    """
+    variants = [("straddle", None), *(("strangle", o) for o in otms)]
+    rows = {}
+    for structure, o in variants:
+        res = run_strategy(hedged_gains, hedge_delta, margin_fraction, cost_multiplier, cvar_level, structure,
+                           o if o is not None else 0.05)
+        label = "straddle (ATM)" if o is None else f"strangle ({o:.0%} OTM)"
+        net, gross = res.metrics.loc["net_per_vega"], res.metrics.loc["gross_per_vega"]
+        cvar = next((c for c in res.metrics.columns if str(c).startswith("cvar_")), None)
+        tr = res.trades
+        rows[label] = {
+            "n": net.get("n", 0),
+            "mean_vega_collected": tr["vega"].mean() if len(tr) else np.nan,
+            "gross_mean": gross.get("mean", np.nan), "net_mean": net.get("mean", np.nan),
+            "cost_per_vega": (tr["cost"] / tr["vega"]).mean() if len(tr) else np.nan,
+            "cost_usd": tr["cost"].mean() if len(tr) else np.nan,
+            "net_t_hac": net.get("t_hac", np.nan), "net_sharpe": net.get("sharpe", np.nan),
+            "net_skew": net.get("skew", np.nan), "net_worst": net.get("worst", np.nan),
+            "net_cvar": net.get(cvar, np.nan) if cvar else np.nan,
+        }
+    return pd.DataFrame(rows).T
+
+
+def margin_sensitivity(trades: pd.DataFrame, fractions: tuple[float, ...] = (0.06, 0.08, 0.10),
+                       cvar_level: float = 0.05) -> pd.DataFrame:
+    """How much of the margin the worst month, the CVaR and the maximum drawdown use, per margin fraction.
+
+    The margin base of a trade is `fraction x 2 legs x F x $50` (an assumption, §4.7). The dollar P&L does
+    not depend on it. With one fraction for every trade, the return on margin is the dollar P&L divided by
+    a number that scales with F, so a different fraction rescales the whole series by 1/fraction: the mean
+    return, the t-statistics, the Sharpe ratio and the skew carry no new information, and they are left
+    out. What a fraction changes is how large the losses are *relative to the margin*, and that is what
+    this table reports: `worst_pct_margin`, `cvar_pct_margin` and `max_drawdown_pct_margin` (-0.5 means
+    half the margin was lost, where a margin call becomes a real risk), next to the same losses in dollars
+    and the average margin base `margin_usd` per structure.
+    """
+    dollars = risk_metrics(trades["net"], cvar_level=cvar_level) if len(trades) else {}
+    cvar_key = next((k for k in dollars if str(k).startswith("cvar_")), None)
+    rows = {}
+    for f in fractions:
+        if trades.empty:
+            rows[f"{f:.0%}"] = {"fraction": f, "n": 0}
+            continue
+        margin = f * 2 * trades["F"] * ES_MULTIPLIER
+        pct = risk_metrics(trades["net"] / margin, cvar_level=cvar_level)
+        rows[f"{f:.0%}"] = {
+            "fraction": f, "n": pct["n"], "margin_usd": float(margin.mean()),
+            "worst_usd": dollars["worst"], "cvar_usd": dollars[cvar_key] if cvar_key else float("nan"),
+            "max_drawdown_usd": dollars["max_drawdown"],
+            "worst_pct_margin": pct["worst"], "cvar_pct_margin": pct[cvar_key] if cvar_key else float("nan"),
+            "max_drawdown_pct_margin": pct["max_drawdown"],
+        }
+    return pd.DataFrame(rows).T

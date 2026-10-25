@@ -38,6 +38,7 @@ class _DefaultCleaning:
     min_range_pct: float = 0.10
     drop_zero_bid: bool = True
     drop_crossed: bool = True
+    drop_locked: bool = True
     backfill_minutes: int = 15
     rate: float = 0.04
 
@@ -129,7 +130,8 @@ def clean_quotes(quotes: pd.DataFrame, cfg: object) -> tuple[pd.DataFrame, dict[
     two_sided = ~q["one_sided"]
     drop("crossed", two_sided & (q["bid"] > q["ask"]) if c.drop_crossed else two_sided & False)
     two_sided = ~q["one_sided"]
-    drop("locked", two_sided & (q["bid"] == q["ask"]) if c.drop_crossed else two_sided & False)
+    drop_locked = getattr(c, "drop_locked", c.drop_crossed)  # objects without the flag keep the old rule
+    drop("locked", two_sided & (q["bid"] == q["ask"]) if drop_locked else two_sided & False)
 
     has_f = "F" in q
     if has_f:
@@ -204,7 +206,10 @@ def pull_snapshots(cfg: Any, universe: pd.DataFrame, client: Any = None, workers
     frames = [f for f in frames if not f.empty]
     if not frames:
         raise ValueError("no option quotes found in the sample")
-    return pd.concat(frames, ignore_index=True)
+    # Drop all-empty columns before concatenating (pandas FutureWarning), then restore every column.
+    columns = list(dict.fromkeys(c for f in frames for c in f.columns))
+    frames = [f.dropna(axis=1, how="all") for f in frames]
+    return pd.concat(frames, ignore_index=True).reindex(columns=columns)
 
 
 def run(cfg: Any, client: Any = None) -> pd.DataFrame:
