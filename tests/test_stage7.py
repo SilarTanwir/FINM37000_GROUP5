@@ -23,9 +23,9 @@ def test_stage7_writes_tables_and_figures(tmp_path):
 
     out = pipeline.run(config.load_config(), data_dir=tmp_path, report_dir=tmp_path / "reports")
 
-    for f in ("tables/h3.csv", "tables/strategy.csv", "tables/strategy_trades.csv",
-              "tables/strategy_structures.csv", "tables/strategy_worst_months.csv",
-              "tables/strategy_margin.csv", "figures/h3.png",
+    for f in ("tables/h3.csv", "tables/h3_sensitivity.csv", "tables/h3_disagreements.csv",
+              "tables/strategy.csv", "tables/strategy_trades.csv", "tables/strategy_structures.csv",
+              "tables/strategy_worst_months.csv", "tables/strategy_margin.csv", "figures/h3.png",
               "figures/strategy.png"):
         assert (tmp_path / "reports" / f).stat().st_size > 0, f
     assert (tmp_path / "h3.parquet").exists()
