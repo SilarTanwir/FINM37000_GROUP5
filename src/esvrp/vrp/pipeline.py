@@ -100,6 +100,9 @@ def run(cfg: Any, data_dir: Path = DATA_DIR, report_dir: Path = REPORT_DIR) -> d
              100 * cfg.strip.max_k0_gap_pct, len(cm),
              int(cm["extrapolated"].sum()) if len(cm) else 0,
              int(vrp_cm["vrp_diff"].notna().sum()) if len(cm) else 0, data_dir)
+    if len(cm):
+        log.info("Stage 5: constant-maturity swap rates by reason: %s",
+                 cm["cm_reason"].value_counts().to_dict())
     for _, row in h1[h1["premium"] == "vrp_diff"].iterrows():
         log.info("H1, %s: mean RV - SW %.5f over %d, t naive %.2f, t HAC(%d) %.2f", row["sample"],
                  row["mean"], row["n"], row["t_naive"], row["hac_lags"], row["t_hac"])

@@ -90,7 +90,7 @@ def constant_maturity(
     The `sw_*` columns are left NaN, with the reason in `cm_reason`, when the nearest valid expiry is
     more than `max_extrapolation_days` beyond the snapshot (`extrapolation_too_far`; `None` turns the cap
     off) or when the extrapolated total variance is not positive (`non_positive_variance`); otherwise
-    `cm_reason` is `ok`.
+    `cm_reason` is `ok`. A `sw_*` column that is not positive is NaN on its own.
     """
     tau_t = target_days / 365
     min_tau = min_front_days / 365
@@ -129,6 +129,8 @@ def constant_maturity(
             reason = "non_positive_variance"
         if reason != "ok":
             row.update({c: np.nan for c in cols})
+        else:  # a bid or ask variant can go non-positive while the mid does not
+            row.update({c: np.nan for c in cols if not row[c] > 0})
         row["cm_reason"] = reason
         rows.append(row)
     return pd.DataFrame(rows, columns=CM_COLUMNS if not rows else None)

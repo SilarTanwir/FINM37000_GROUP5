@@ -317,3 +317,10 @@ def test_non_positive_extrapolated_variance_is_left_empty():
 def test_no_cap_keeps_the_old_behaviour():
     cm = constant_maturity(_strips([(83, 0.04), (113, 0.045)]))
     assert cm["sw_mid"].notna().iloc[0] and cm["cm_reason"].iloc[0] == "ok"
+
+
+def test_a_non_positive_bid_variant_is_left_empty_on_its_own():
+    strips = _strips([(20, 0.04), (50, 0.05)]).assign(sw_bid=[0.04, -0.2])
+    cm = constant_maturity(strips, max_extrapolation_days=60)
+    assert cm["cm_reason"].iloc[0] == "ok" and cm["sw_mid"].notna().iloc[0]
+    assert cm["sw_bid"].isna().iloc[0]
