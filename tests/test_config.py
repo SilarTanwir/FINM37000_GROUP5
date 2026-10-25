@@ -2,7 +2,7 @@
 
 import pytest
 
-from esvrp.config import ConfigError, load_config
+from esvrp.config import DEFAULT_PATH, ConfigError, load_config
 
 
 def test_default_config_loads():
@@ -12,7 +12,7 @@ def test_default_config_loads():
 
 
 def test_bad_choice_rejected(tmp_path):
-    text = open("config/default.yaml").read().replace("price_col: mid", "price_col: wat")
+    text = open(DEFAULT_PATH).read().replace("price_col: mid", "price_col: wat")
     p = tmp_path / "bad.yaml"
     p.write_text(text)
     with pytest.raises(ConfigError):

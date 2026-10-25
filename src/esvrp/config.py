@@ -47,17 +47,34 @@ class CleaningConfig:
 
 
 @dataclass(frozen=True)
+class QualityConfig:
+    action: str  # flag | reject: what to do with a chain that fails a threshold (§6 stage 4, roadmap 20)
+    min_calls: int  # two-sided calls per chain
+    min_puts: int  # two-sided puts per chain
+    min_strikes: int
+    min_range_pct: float  # strikes must reach F(1 - x) and F(1 + x)
+    max_quote_age_s: float  # a quote older than this at the snapshot is stale
+    max_stale_share: float  # flag the chain if more than this share of its quotes is stale
+    max_futures_age_s: float  # futures observation older than this at the snapshot
+    max_sync_gap_s: float  # median |option quote time - futures observation time|
+
+
+@dataclass(frozen=True)
 class StripConfig:
     method: str
     price_col: str
     maturity_mode: str
     min_front_days: int
+    max_iv: float  # strip inputs with an implied vol above this are dropped (Bakshi-Kapadia: 100%)
+    min_iv: float  # ... or below this (Bakshi-Kapadia: 1%)
+    max_k0_gap_pct: float  # no swap rate if K0 is this fraction of F below F (no quotes near the money)
 
 
 @dataclass(frozen=True)
 class RealizedConfig:
     frequency: list[str]
     session: str  # decided: full_globex (§15.3)
+    max_gap_days: float  # RV is left empty if the bars miss either end of the window by more than this
 
 
 @dataclass(frozen=True)
@@ -93,6 +110,7 @@ class Config:
     data: DataConfig
     pricing: PricingConfig
     cleaning: CleaningConfig
+    quality: QualityConfig
     strip: StripConfig
     realized: RealizedConfig
     hedging: HedgingConfig
@@ -105,6 +123,7 @@ _CHOICES: dict[tuple[str, str], set[str]] = {
     ("data", "series"): {"weekly", "monthly_eom", "quarterly"},
     ("pricing", "rate_source"): {"constant", "fred"},
     ("pricing", "day_count"): {"ACT/365"},
+    ("quality", "action"): {"flag", "reject"},
     ("strip", "method"): {"vix_discrete", "iv_grid"},
     ("strip", "price_col"): {"mid", "bid", "ask"},
     ("strip", "maturity_mode"): {"matched", "constant_30d"},
@@ -141,6 +160,7 @@ def load_config(path: str | Path = DEFAULT_PATH) -> Config:
     sections = {f.name: f.type for f in fields(Config)}
     classes = {
         "data": DataConfig, "pricing": PricingConfig, "cleaning": CleaningConfig,
+            "quality": QualityConfig,
         "strip": StripConfig, "realized": RealizedConfig, "hedging": HedgingConfig,
         "costs": CostsConfig, "inference": InferenceConfig, "regimes": RegimesConfig,
     }
@@ -159,11 +179,26 @@ def _validate_values(cfg: Config) -> None:
         raise ConfigError("data.budget_usd must be positive")
     if not 0 < cfg.hedging.moneyness_max < 1:
         raise ConfigError("hedging.moneyness_max must be in (0, 1)")
+    q = cfg.quality
+    if min(q.min_calls, q.min_puts, q.min_strikes) < 1:
+        raise ConfigError("quality.min_calls, min_puts and min_strikes must be >= 1")
+    if not 0 < q.min_range_pct < 1:
+        raise ConfigError("quality.min_range_pct must be in (0, 1)")
+    if not 0 <= q.max_stale_share <= 1:
+        raise ConfigError("quality.max_stale_share must be in [0, 1]")
+    if min(q.max_quote_age_s, q.max_futures_age_s, q.max_sync_gap_s) < 0:
+        raise ConfigError("quality age and sync thresholds must be >= 0")
     if cfg.regimes.n_bins < 2:
         raise ConfigError("regimes.n_bins must be >= 2")
     if cfg.cleaning.min_strikes < 3:
         raise ConfigError("cleaning.min_strikes must be >= 3")
     if isinstance(cfg.inference.hac_lags, str) and cfg.inference.hac_lags != "auto":
         raise ConfigError("inference.hac_lags must be an int or 'auto'")
+    if not 0 <= cfg.strip.min_iv < cfg.strip.max_iv:
+        raise ConfigError("strip.min_iv must be non-negative and below strip.max_iv")
+    if not 0 < cfg.strip.max_k0_gap_pct < 1:
+        raise ConfigError("strip.max_k0_gap_pct must be in (0, 1)")
+    if cfg.realized.max_gap_days <= 0:
+        raise ConfigError("realized.max_gap_days must be positive")
     if sorted(cfg.hedging.maturity_buckets_days) != cfg.hedging.maturity_buckets_days:
         raise ConfigError("hedging.maturity_buckets_days must be ascending")
