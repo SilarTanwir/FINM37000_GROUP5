@@ -27,6 +27,7 @@ def test_stage7_writes_tables_and_figures(tmp_path):
     for f in ("tables/h3.csv", "tables/h3_sensitivity.csv", "tables/h3_disagreements.csv",
               "tables/strategy.csv", "tables/strategy_trades.csv", "tables/strategy_structures.csv",
               "tables/strategy_worst_months.csv", "tables/strategy_margin.csv", "tables/summary.csv",
+              "tables/strategy_skipped.csv",
               "figures/h3.png",
               "figures/strategy.png"):
         assert (tmp_path / "reports" / f).stat().st_size > 0, f
@@ -78,3 +79,13 @@ def test_stage_runner_and_task_graph_include_stage8():
     assert task["actions"] == ["python -m esvrp.stages 8"]
     assert "reports/tables/headline.csv" in task["targets"]
     assert {"reports/tables/h1.csv", "reports/tables/summary.csv"} <= set(task["file_dep"])
+
+
+def test_sample_expiries_stop_at_the_sample_end():
+    """Expiries listed after data.end are not expected to trade, so they are not logged as skipped (#56)."""
+    from esvrp.analysis.pipeline import sample_expiries
+
+    vrp = pd.DataFrame({"expiry": pd.to_datetime(["2026-08-31 20:00", "2026-09-30 20:00", "2026-10-30 20:00",
+                                                  "2026-09-30 20:00"], utc=True)})
+    out = sample_expiries(vrp, pd.Timestamp("2026-09-30").date())
+    assert [e.strftime("%Y-%m-%d") for e in out] == ["2026-08-31", "2026-09-30"]
