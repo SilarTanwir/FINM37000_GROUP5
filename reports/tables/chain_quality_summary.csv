@@ -1,0 +1,12 @@
+rule,chains
+chains,5445
+failing,452
+rejected,0
+sync_not_measured,0
+few_calls,12
+few_puts,8
+few_strikes,5
+narrow_range,330
+stale_quotes,1
+stale_futures,109
+unsynchronized,109

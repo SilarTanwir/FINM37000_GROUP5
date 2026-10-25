@@ -1,0 +1,101 @@
+hypothesis,table,row,statistic,value
+H1,h1,"constant 30-day (daily, overlapping) | vrp_diff",n,655.0
+H1,h1,"constant 30-day (daily, overlapping) | vrp_log",n,655.0
+H1,h1,"matched, monthly (non-overlapping) | vrp_diff",n,34.0
+H1,h1,"matched, monthly (non-overlapping) | vrp_log",n,34.0
+H1,h1,"constant 30-day (daily, overlapping) | vrp_diff",mean,-0.0075711651306697
+H1,h1,"constant 30-day (daily, overlapping) | vrp_log",mean,-0.5238336685114602
+H1,h1,"matched, monthly (non-overlapping) | vrp_diff",mean,-0.0052967860002468
+H1,h1,"matched, monthly (non-overlapping) | vrp_log",mean,-0.4933557242773563
+H1,h1,"constant 30-day (daily, overlapping) | vrp_diff",t_naive,-5.509054065193941
+H1,h1,"constant 30-day (daily, overlapping) | vrp_log",t_naive,-22.843499748929183
+H1,h1,"matched, monthly (non-overlapping) | vrp_diff",t_naive,-0.8123504651855763
+H1,h1,"matched, monthly (non-overlapping) | vrp_log",t_naive,-4.592972064173522
+H1,h1,"constant 30-day (daily, overlapping) | vrp_diff",t_hac,-1.6691987200290803
+H1,h1,"constant 30-day (daily, overlapping) | vrp_log",t_hac,-6.339199441028705
+H1,h1,"matched, monthly (non-overlapping) | vrp_diff",t_hac,-1.1666981169647606
+H1,h1,"matched, monthly (non-overlapping) | vrp_log",t_hac,-6.975504363774648
+H1,h1,"constant 30-day (daily, overlapping) | vrp_diff",t_hac_30,-1.6126688652628498
+H1,h1,"constant 30-day (daily, overlapping) | vrp_log",t_hac_30,-5.7457923483911655
+H1,h1,"constant 30-day (daily, overlapping) | vrp_log",sharpe_short,0.8639718061232425
+H1,h1,"matched, monthly (non-overlapping) | vrp_log",sharpe_short,4.144067104088722
+H2,summary,otm_put | 14-30d,n,29684.0
+H2,summary,otm_put | 31-60d,n,30591.0
+H2,summary,near_atm | 14-30d,n,23306.0
+H2,summary,near_atm | 31-60d,n,22207.0
+H2,summary,otm_call | 14-30d,n,20180.0
+H2,summary,otm_call | 31-60d,n,26498.0
+H2,summary,otm_put | 14-30d,n_dates,412.0
+H2,summary,otm_put | 31-60d,n_dates,696.0
+H2,summary,near_atm | 14-30d,n_dates,411.0
+H2,summary,near_atm | 31-60d,n_dates,686.0
+H2,summary,otm_call | 14-30d,n_dates,412.0
+H2,summary,otm_call | 31-60d,n_dates,698.0
+H2,summary,otm_put | 14-30d,mean,-1.7985824480257488
+H2,summary,otm_put | 31-60d,mean,-1.073359675491422
+H2,summary,near_atm | 14-30d,mean,-1.0766866043061565
+H2,summary,near_atm | 31-60d,mean,-0.2982554014033624
+H2,summary,otm_call | 14-30d,mean,-2.1272145349751375
+H2,summary,otm_call | 31-60d,mean,-1.4805322851443117
+H2,summary,otm_put | 14-30d,t_naive,-51.923829598943605
+H2,summary,otm_put | 31-60d,t_naive,-29.16659500249174
+H2,summary,near_atm | 14-30d,t_naive,-37.75503805071562
+H2,summary,near_atm | 31-60d,t_naive,-9.66189150328443
+H2,summary,otm_call | 14-30d,t_naive,-44.07698350446823
+H2,summary,otm_call | 31-60d,t_naive,-40.36375203242027
+H2,summary,otm_put | 14-30d,t_hac,-3.384494958603341
+H2,summary,otm_put | 31-60d,t_hac,-1.0901808667119404
+H2,summary,near_atm | 14-30d,t_hac,-1.6772145462358434
+H2,summary,near_atm | 31-60d,t_hac,-0.956950970306998
+H2,summary,otm_call | 14-30d,t_hac,-4.700815623593441
+H2,summary,otm_call | 31-60d,t_hac,-2.8474643228407577
+H2,summary,otm_put | 14-30d,t_cluster,-7.860666858982288
+H2,summary,otm_put | 31-60d,t_cluster,-6.106022264017433
+H2,summary,near_atm | 14-30d,t_cluster,-5.490389963813397
+H2,summary,near_atm | 31-60d,t_cluster,-2.514997220123552
+H2,summary,otm_call | 14-30d,t_cluster,-10.196339836988228
+H2,summary,otm_call | 31-60d,t_cluster,-11.331007771172414
+H3,h3,all chains (overlapping),n,1049.0
+H3,h3,monthly (non-overlapping),n,36.0
+H3,h3,all chains (overlapping),mean_vrp,-0.0104826303286864
+H3,h3,monthly (non-overlapping),mean_vrp,-0.0056716332860655
+H3,h3,all chains (overlapping),t_vrp_hac,-3.4234628991193854
+H3,h3,monthly (non-overlapping),t_vrp_hac,-1.2961917828907232
+H3,h3,all chains (overlapping),mean_hg,-0.0020509526628701
+H3,h3,monthly (non-overlapping),mean_hg,0.0006717181693371
+H3,h3,all chains (overlapping),t_hg_hac,-0.965055922525023
+H3,h3,monthly (non-overlapping),t_hg_hac,0.1892877246919515
+H3,h3,all chains (overlapping),sign_agree,0.8102955195424214
+H3,h3,monthly (non-overlapping),sign_agree,0.8888888888888888
+H3,h3,all chains (overlapping),pearson,0.8526462239319147
+H3,h3,monthly (non-overlapping),pearson,0.95150057286852
+H3,h3,all chains (overlapping),ci_low,0.4799794090902345
+H3,h3,monthly (non-overlapping),ci_low,0.9062650499544922
+H3,h3,all chains (overlapping),ci_high,0.9357579102075604
+H3,h3,monthly (non-overlapping),ci_high,0.9751900170104494
+H3,h3,all chains (overlapping),spearman,0.6150058787878158
+H3,h3,monthly (non-overlapping),spearman,0.5649935649935651
+H4,strategy,gross_per_vega,n,36.0
+H4,strategy,net_per_vega,n,36.0
+H4,strategy,net,n,36.0
+H4,strategy,gross_per_vega,mean,-0.1713841712003696
+H4,strategy,net_per_vega,mean,-0.9921264902292912
+H4,strategy,net,mean,-518.8993533373412
+H4,strategy,gross_per_vega,t_hac,-0.2691788658574169
+H4,strategy,net_per_vega,t_hac,-1.469986767355453
+H4,strategy,net,t_hac,-1.1401553530716837
+H4,strategy,gross_per_vega,sharpe,-0.1340294703839015
+H4,strategy,net_per_vega,sharpe,-0.7533737327231038
+H4,strategy,net,sharpe,-0.5865620018938049
+H4,strategy,gross_per_vega,skew,-1.9865981958818455
+H4,strategy,net_per_vega,skew,-1.830976195643809
+H4,strategy,net,skew,-1.503672968780091
+H4,strategy,gross_per_vega,worst,-18.27564158182303
+H4,strategy,net_per_vega,worst,-19.24934970113528
+H4,strategy,net,worst,-12242.02568100951
+H4,strategy,gross_per_vega,max_drawdown,-33.7576198064788
+H4,strategy,net_per_vega,max_drawdown,-52.94548979195074
+H4,strategy,net,max_drawdown,-32148.4707648652
+H4,strategy,gross_per_vega,share_positive,0.5277777777777778
+H4,strategy,net_per_vega,share_positive,0.4444444444444444
+H4,strategy,net,share_positive,0.4444444444444444
