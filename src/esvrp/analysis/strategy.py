@@ -3,7 +3,8 @@
 Implements PLANNING.md §4.7 and §6 stage 7.
 
 Each month, sell one delta-hedged at-the-money straddle on the end-of-month expiry, on the first
-snapshot of that month, and hold it to expiry; the next trade starts after it expires, so trades never
+snapshot of that month (or, if no straddle can be formed that day, the next snapshot with one, up to five
+business days later), and hold it to expiry; the next trade starts after it expires, so trades never
 overlap. The legs come from the stage 6 hedged gains (daily futures hedge, settlement at expiry), so
 the short position earns minus the long gain. Selling at the bid is the mid gain less the half-spread,
 which is part of each leg's `cost` along with hedge slippage and fees.
@@ -29,6 +30,7 @@ Returns (decided, §4.7 and §15.5):
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 
 import numpy as np
@@ -37,12 +39,16 @@ import pandas as pd
 from esvrp.analysis.inference import mean_with_se
 from esvrp.hedging.costs import ES_MULTIPLIER
 
+log = logging.getLogger(__name__)
+
 TZ = "America/Chicago"
 STRUCTURES = ("straddle", "strangle")
-TRADE_COLUMNS = ["date", "expiry", "underlying", "structure", "strike", "strike_call", "strike_put", "F",
-                 "F_T", "move", "moneyness", "moneyness_call", "moneyness_put", "days", "iv_call", "iv_put",
-                 "vega", "gross", "cost", "net", "gross_per_vega", "net_per_vega", "margin", "gross_return",
-                 "net_return"]
+MAX_LOOKAHEAD_DAYS = 5  # business days after the month's first snapshot that an entry may be delayed
+SKIPPED_COLUMNS = ["expiry", "first_snapshot", "snapshots_tried", "reason"]
+TRADE_COLUMNS = ["date", "entry_delay_days", "expiry", "underlying", "structure", "strike", "strike_call",
+                 "strike_put", "F", "F_T", "move", "moneyness", "moneyness_call", "moneyness_put", "days",
+                 "iv_call", "iv_put", "vega", "gross", "cost", "net", "gross_per_vega", "net_per_vega",
+                 "margin", "gross_return", "net_return"]
 WORST_COLUMNS = ["rank", "date", "expiry", "structure", "net_per_vega", "net", "gross", "cost", "move",
                  "iv_entry", "days"]
 
@@ -52,18 +58,24 @@ class StrategyResult:
     trades: pd.DataFrame = field(default_factory=pd.DataFrame)  # one row per monthly trade
     metrics: pd.DataFrame = field(default_factory=pd.DataFrame)  # rows: series, columns: risk metrics
     worst: pd.DataFrame = field(default_factory=pd.DataFrame)  # the worst months, with the move behind each
+    skipped: pd.DataFrame = field(default_factory=pd.DataFrame)  # months with an expiry but no trade, and why
 
 
-def _entry_legs(hedged_gains: pd.DataFrame, hedge_delta: str) -> pd.DataFrame:
-    """The legs available on each end-of-month expiry's entry date (first snapshot of the expiry's month)."""
+def _month_legs(hedged_gains: pd.DataFrame, hedge_delta: str) -> pd.DataFrame:
+    """Every leg whose snapshot is in the expiry's own month (the days a monthly trade may be entered)."""
     g = hedged_gains[hedged_gains["hedge_delta"] == hedge_delta]
     if g.empty:
         return g
     g = g.assign(month=pd.to_datetime(g["date"]).dt.to_period("M"),
                  expiry_month=pd.to_datetime(g["expiry"], utc=True).dt.tz_convert(TZ).dt.tz_localize(None)
                  .dt.to_period("M"))
-    g = g[g["month"] == g["expiry_month"]]
-    return g[g["date"] == g.groupby("expiry")["date"].transform("min")]
+    return g[g["month"] == g["expiry_month"]]
+
+
+def _business_days(start: object, end: object) -> int:
+    """Business days from `start` to `end` (weekends only; exchange holidays are not removed)."""
+    first, last = (np.datetime64(pd.Timestamp(x).date()) for x in (start, end))
+    return int(np.busday_count(first, last))
 
 
 def _pick_straddle(day: pd.DataFrame) -> tuple[pd.Series, pd.Series] | None:
@@ -95,10 +107,18 @@ def _pick_strangle(day: pd.DataFrame, otm: float, tolerance: float) -> tuple[pd.
     return calls.loc[dc.idxmin()], puts.loc[dp.idxmin()]
 
 
-def monthly_trades(hedged_gains: pd.DataFrame, structure: str = "straddle", hedge_delta: str = "iv_daily",
-                   margin_fraction: float = 0.10, cost_multiplier: float = 1.0, otm: float = 0.05,
-                   tolerance: float = 0.02) -> pd.DataFrame:
-    """One short structure per end-of-month expiry, entered on the first snapshot of its month.
+def monthly_trades_log(hedged_gains: pd.DataFrame, structure: str = "straddle", hedge_delta: str = "iv_daily",
+                       margin_fraction: float = 0.10, cost_multiplier: float = 1.0, otm: float = 0.05,
+                       tolerance: float = 0.02, max_lookahead_days: int = MAX_LOOKAHEAD_DAYS,
+                       expected_expiries: object = None) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """One short structure per end-of-month expiry, and a log of the expiries that got no trade.
+
+    The trade is entered on the first snapshot of the expiry's month. If the structure cannot be formed
+    that day (for example no strike has both a two-sided call and put, as in 2024-06, 2024-07, 2025-11
+    and 2025-12 of the first real run, #56), the next snapshots are tried in order, up to
+    `max_lookahead_days` business days after the first one (default 5, which still leaves about three
+    weeks to expiry). The trade records `entry_delay_days`, the business days between the first snapshot
+    and the one used (0 for the first), so a delayed entry is visible.
 
     - `straddle`: the strike closest to the forward `F` that has both a call and a put.
     - `strangle`: the out-of-the-money call and put about `otm` (5% of F) above and below `F`. `tolerance`
@@ -109,16 +129,40 @@ def monthly_trades(hedged_gains: pd.DataFrame, structure: str = "straddle", hedg
     `cost_multiplier` times the legs' costs. `vega` is the structure's dollar vega per vol point at entry,
     `F_T` the futures settlement at expiry and `move = F_T / F - 1` the market move it had to survive.
     The margin base is two legs' futures notional (an assumption, as before), for both structures.
+
+    Returns `(trades, skipped)`. `skipped` has one row per expiry with snapshots in its month but no
+    trade (`reason`: `no_strike_with_both_legs` or `no_otm_legs_within_tolerance`, with the number of
+    snapshots tried). Pass `expected_expiries` (for example every expiry in the sample) to also list those
+    with no snapshot at all in their month (`no_entries_in_month`), so every month with an expiry either
+    has a trade or a logged reason.
     """
     if structure not in STRUCTURES:
         raise ValueError(f"structure must be one of {STRUCTURES}, got {structure!r}")
-    g = _entry_legs(hedged_gains, hedge_delta)
-    if g.empty:
-        return pd.DataFrame(columns=TRADE_COLUMNS)
-    rows = []
-    for (_, _), day in g.groupby(["date", "expiry"], sort=True):
-        pair = _pick_straddle(day) if structure == "straddle" else _pick_strangle(day, otm, tolerance)
+    if max_lookahead_days < 0:
+        raise ValueError("max_lookahead_days must be non-negative")
+    g = _month_legs(hedged_gains, hedge_delta)
+    rows, skipped = [], []
+    reason = "no_strike_with_both_legs" if structure == "straddle" else "no_otm_legs_within_tolerance"
+    seen = set()
+    for expiry, legs in (g.groupby("expiry", sort=True) if len(g) else []):
+        seen.add(pd.Timestamp(expiry))
+        dates = sorted(legs["date"].unique())
+        first = dates[0]
+        tried = 0
+        pair, chosen = None, None
+        for d in dates:
+            delay = _business_days(first, d)
+            if delay > max_lookahead_days:
+                break
+            tried += 1
+            day = legs[legs["date"] == d]
+            pair = _pick_straddle(day) if structure == "straddle" else _pick_strangle(day, otm, tolerance)
+            if pair is not None:
+                chosen = (d, delay)
+                break
         if pair is None:
+            skipped.append({"expiry": expiry, "first_snapshot": first, "snapshots_tried": tried,
+                            "reason": reason})
             continue
         c, p = pair
         gross = -(float(c["gain"]) + float(p["gain"]))
@@ -131,7 +175,8 @@ def monthly_trades(hedged_gains: pd.DataFrame, structure: str = "straddle", hedg
         k_put = float(p["strike"]) if "strike" in p else float(p.name)
         margin = margin_fraction * 2 * F * ES_MULTIPLIER
         rows.append({
-            "date": c["date"], "expiry": c["expiry"], "underlying": c["underlying"], "structure": structure,
+            "date": c["date"], "entry_delay_days": chosen[1], "expiry": c["expiry"],
+            "underlying": c["underlying"], "structure": structure,
             "strike": k_call if same else float("nan"), "strike_call": k_call, "strike_put": k_put,
             "F": F, "F_T": F_T, "move": F_T / F - 1,
             "moneyness": float(c["moneyness"]) if same else float("nan"),
@@ -141,9 +186,27 @@ def monthly_trades(hedged_gains: pd.DataFrame, structure: str = "straddle", hedg
             "net_per_vega": (gross - cost) / vega, "margin": margin, "gross_return": gross / margin,
             "net_return": (gross - cost) / margin,
         })
-    if not rows:
-        return pd.DataFrame(columns=TRADE_COLUMNS)
-    return pd.DataFrame(rows).sort_values("date").reset_index(drop=True)[TRADE_COLUMNS]
+    for expiry in (expected_expiries if expected_expiries is not None else []):
+        if pd.Timestamp(expiry) not in seen:
+            skipped.append({"expiry": expiry, "first_snapshot": pd.NaT, "snapshots_tried": 0,
+                            "reason": "no_entries_in_month"})
+    trades = (pd.DataFrame(rows).sort_values("date").reset_index(drop=True)[TRADE_COLUMNS] if rows
+              else pd.DataFrame(columns=TRADE_COLUMNS))
+    log_df = (pd.DataFrame(skipped, columns=SKIPPED_COLUMNS).sort_values("expiry").reset_index(drop=True)
+              if skipped else pd.DataFrame(columns=SKIPPED_COLUMNS))
+    delayed = int((trades["entry_delay_days"] > 0).sum()) if len(trades) else 0
+    if delayed or len(log_df):
+        log.info("Strategy (%s): %d trades, %d entered on a later snapshot, %d months without a trade",
+                 structure, len(trades), delayed, len(log_df))
+    return trades, log_df
+
+
+def monthly_trades(hedged_gains: pd.DataFrame, structure: str = "straddle", hedge_delta: str = "iv_daily",
+                   margin_fraction: float = 0.10, cost_multiplier: float = 1.0, otm: float = 0.05,
+                   tolerance: float = 0.02, max_lookahead_days: int = MAX_LOOKAHEAD_DAYS) -> pd.DataFrame:
+    """The trades of `monthly_trades_log` without the log of skipped months."""
+    return monthly_trades_log(hedged_gains, structure, hedge_delta, margin_fraction, cost_multiplier, otm,
+                              tolerance, max_lookahead_days)[0]
 
 
 def monthly_straddles(hedged_gains: pd.DataFrame, hedge_delta: str = "iv_daily",
@@ -197,24 +260,35 @@ def risk_metrics(x: pd.Series, periods_per_year: int = 12, cvar_level: float = 0
 
 def run_strategy(hedged_gains: pd.DataFrame, hedge_delta: str = "iv_daily", margin_fraction: float = 0.10,
                  cost_multiplier: float = 1.0, cvar_level: float = 0.05, structure: str = "straddle",
-                 otm: float = 0.05, n_worst: int = 5) -> StrategyResult:
-    """Sell one hedged ATM straddle (or strangle) monthly at the bid, charge all costs, report tails."""
+                 otm: float = 0.05, n_worst: int = 5, max_lookahead_days: int = MAX_LOOKAHEAD_DAYS,
+                 expected_expiries: object = None) -> StrategyResult:
+    """Sell one hedged ATM straddle (or strangle) monthly at the bid, charge all costs, report tails.
+
+    An entry that cannot be formed on a month's first snapshot is tried on the next snapshots, up to
+    `max_lookahead_days` business days later (`entry_delay_days` on the trade). `skipped` lists the
+    months with an expiry but no trade; see `monthly_trades_log`.
+    """
     # Decided (§4.7, §15.5): entry vega primary; assumed margin fraction secondary.
-    trades = monthly_trades(hedged_gains, structure, hedge_delta, margin_fraction, cost_multiplier, otm)
+    trades, skipped = monthly_trades_log(
+        hedged_gains, structure, hedge_delta, margin_fraction, cost_multiplier, otm,
+        max_lookahead_days=max_lookahead_days, expected_expiries=expected_expiries)
     series = {"gross_per_vega": "vol points", "net_per_vega": "vol points", "gross": "dollars",
               "net": "dollars", "gross_return": "return on margin", "net_return": "return on margin"}
     metrics = pd.DataFrame({name: risk_metrics(trades[name], cvar_level=cvar_level) for name in series}).T
     metrics.insert(0, "units", pd.Series(series))
-    return StrategyResult(trades=trades, metrics=metrics, worst=worst_months(trades, n_worst))
+    return StrategyResult(trades=trades, metrics=metrics, worst=worst_months(trades, n_worst),
+                          skipped=skipped)
 
 
 def run_structures(hedged_gains: pd.DataFrame, hedge_delta: str = "iv_daily", margin_fraction: float = 0.10,
                    cost_multiplier: float = 1.0, cvar_level: float = 0.05,
-                   otms: tuple[float, ...] = (0.03, 0.05, 0.07)) -> pd.DataFrame:
+                   otms: tuple[float, ...] = (0.03, 0.05, 0.07),
+                   max_lookahead_days: int = MAX_LOOKAHEAD_DAYS) -> pd.DataFrame:
     """Baseline straddle next to strangles at several distances: the robustness table.
 
     One row per structure (the straddle, then a strangle at each `otm`), net and gross per unit vega:
-    number of trades, mean, HAC t, Sharpe, skew, worst month and CVaR. If the strangles tell the same story
+    number of trades (and how many were entered on a later snapshot, `n_delayed`), mean, HAC t, Sharpe,
+    skew, worst month and CVaR. If the strangles tell the same story
     as the straddle, the result does not hinge on selling the at-the-money options.
 
     `cost_per_vega` (gross minus net, per unit of vega) and `cost_usd` show how much of each structure's
@@ -225,13 +299,14 @@ def run_structures(hedged_gains: pd.DataFrame, hedge_delta: str = "iv_daily", ma
     rows = {}
     for structure, o in variants:
         res = run_strategy(hedged_gains, hedge_delta, margin_fraction, cost_multiplier, cvar_level, structure,
-                           o if o is not None else 0.05)
+                           o if o is not None else 0.05, max_lookahead_days=max_lookahead_days)
         label = "straddle (ATM)" if o is None else f"strangle ({o:.0%} OTM)"
         net, gross = res.metrics.loc["net_per_vega"], res.metrics.loc["gross_per_vega"]
         cvar = next((c for c in res.metrics.columns if str(c).startswith("cvar_")), None)
         tr = res.trades
         rows[label] = {
             "n": net.get("n", 0),
+            "n_delayed": int((tr["entry_delay_days"] > 0).sum()) if len(tr) else 0,
             "mean_vega_collected": tr["vega"].mean() if len(tr) else np.nan,
             "gross_mean": gross.get("mean", np.nan), "net_mean": net.get("mean", np.nan),
             "cost_per_vega": (tr["cost"] / tr["vega"]).mean() if len(tr) else np.nan,
