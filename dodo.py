@@ -57,7 +57,7 @@ def task_vrp():
                    "src/esvrp/vrp/pipeline.py", "src/esvrp/reporting/figures.py"],
                   [f"{D}/strip.parquet", f"{D}/rv.parquet", f"{D}/vrp.parquet",
                    f"{D}/strip_cm.parquet", f"{D}/rv_cm.parquet", f"{D}/vrp_cm.parquet",
-                   f"{R}/tables/vrp_descriptives.csv"], "Stage 5")
+                   f"{R}/tables/vrp_descriptives.csv", f"{R}/tables/h1.csv"], "Stage 5")
 
 
 def task_hedging():
@@ -75,17 +75,21 @@ def task_analysis():
                    "src/esvrp/analysis/inference.py", "src/esvrp/analysis/strategy.py",
                    "src/esvrp/analysis/buckets.py", "src/esvrp/analysis/reconcile.py",
                    "src/esvrp/analysis/pipeline.py", "src/esvrp/reporting/figures.py"],
-                  # summary.csv is the bucket table of roadmap 14, not written yet.
-                  [f"{R}/tables/summary.csv", f"{R}/tables/h3.csv", f"{R}/tables/strategy.csv",
-                   f"{D}/h3.parquet"], "Stage 7")
+                  [f"{R}/tables/summary.csv", f"{R}/tables/h3.csv", f"{R}/tables/h3_sensitivity.csv",
+                   f"{R}/tables/h3_disagreements.csv", f"{R}/tables/strategy.csv",
+                   f"{R}/tables/strategy_structures.csv", f"{R}/tables/strategy_worst_months.csv",
+                   f"{R}/tables/strategy_skipped.csv",
+                   f"{R}/tables/strategy_margin.csv", f"{D}/h3.parquet"], "Stage 7")
 
 
 def task_report():
     """Stage 8: figures and tables."""
     return _stage(8, "report",
-                  [f"{R}/tables/summary.csv", f"{R}/tables/strategy.csv",
-                   "src/esvrp/reporting/figures.py", "src/esvrp/reporting/tables.py"],
-                  [f"{R}/figures/.done"], "Stage 8")
+                  # robustness.csv (#19) is read when present but is not a dependency: no stage writes it yet.
+                  [f"{R}/tables/h1.csv", f"{R}/tables/summary.csv", f"{R}/tables/h3.csv",
+                   f"{R}/tables/strategy.csv", "src/esvrp/reporting/figures.py",
+                   "src/esvrp/reporting/tables.py"],
+                  [f"{R}/tables/headline.csv", f"{R}/figures/.done"], "Stage 8")
 
 
 def task_test():

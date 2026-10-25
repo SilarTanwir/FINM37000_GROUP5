@@ -406,5 +406,25 @@ def chain_quality_figure(quality: pd.DataFrame, out_path: Path) -> Path:
     return out_path
 
 
+STAGE_FIGURES = ("forward_gap.png", "chain_quality.png", "sw_vs_rv.png", "vrp_distribution.png",
+                 "rv_comparison.png", "h3.png", "strategy.png")
+
+
 def make_figures(results: dict[str, pd.DataFrame], out_dir: Path) -> list[Path]:
-    raise NotImplementedError
+    """Stage 8: check that the stage 4-7 figures exist in `out_dir`; return the ones found.
+
+    The figures are drawn by the stages that compute their data, so nothing is redrawn here. A missing
+    figure is logged, not raised, so a partial run still finishes. Writes `out_dir/.done` (the `doit
+    report` target) listing the figures found. `results` is unused and kept for the stage 8 signature.
+    """
+    import logging
+
+    out_dir = Path(out_dir)
+    found = [out_dir / f for f in STAGE_FIGURES if (out_dir / f).exists()]
+    missing = [f for f in STAGE_FIGURES if not (out_dir / f).exists()]
+    if missing:
+        logging.getLogger(__name__).warning("Stage 8: figures missing from %s: %s", out_dir,
+                                            ", ".join(missing))
+    out_dir.mkdir(parents=True, exist_ok=True)
+    (out_dir / ".done").write_text("".join(f"{p.name}\n" for p in found), encoding="utf-8")
+    return found

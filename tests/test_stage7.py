@@ -18,16 +18,25 @@ def test_stage7_writes_tables_and_figures(tmp_path):
     vrp = chain.groupby(["date", "expiry"]).size().rename("n").reset_index()
     vrp["vrp_diff"] = np.linspace(-0.02, 0.01, len(vrp))
     vrp["sw"], vrp["rv"] = 0.04, 0.04 + vrp["vrp_diff"]
+    vrp["tau"] = 30 / 365  # stage 5 carries each chain's tau; the H2 regimes pick the chain nearest 30 days
     gains.to_parquet(tmp_path / "hedged_gains.parquet")
     vrp.to_parquet(tmp_path / "vrp.parquet")
 
     out = pipeline.run(config.load_config(), data_dir=tmp_path, report_dir=tmp_path / "reports")
 
-    for f in ("tables/h3.csv", "tables/strategy.csv", "tables/strategy_trades.csv", "figures/h3.png",
+    for f in ("tables/h3.csv", "tables/h3_sensitivity.csv", "tables/h3_disagreements.csv",
+              "tables/strategy.csv", "tables/strategy_trades.csv", "tables/strategy_structures.csv",
+              "tables/strategy_worst_months.csv", "tables/strategy_margin.csv", "tables/summary.csv",
+              "tables/strategy_skipped.csv",
+              "figures/h3.png",
               "figures/strategy.png"):
         assert (tmp_path / "reports" / f).stat().st_size > 0, f
     assert (tmp_path / "h3.parquet").exists()
     assert len(out["strategy_trades"]) == 1  # September is the only expiry inside the sample
+    assert list(out["strategy_margin"].index) == ["6%", "8%", "10%"]
+    structures = out["strategy_structures"]
+    assert structures.index[0] == "straddle (ATM)" and len(structures) == 4
+    assert len(out["strategy_worst_months"]) == 1 and out["strategy_worst_months"].iloc[0]["rank"] == 1
     assert out["h3"].loc["all chains (overlapping)", "n"] == len(out["h3_chains"]) > 0
     assert pd.read_csv(tmp_path / "reports/tables/strategy.csv", index_col=0).loc["net", "n"] == 1
 
@@ -57,3 +66,26 @@ def test_stage_runner_and_task_graph_include_stage7():
     deps = {d for task in tasks for d in task.get("file_dep", [])}
     produced_or_source = targets | {d for d in deps if not d.startswith(("data/", "reports/"))}
     assert deps <= produced_or_source  # every data file a task needs is some task's target
+
+
+def test_stage_runner_and_task_graph_include_stage8():
+    import esvrp.stages as stages
+
+    assert "esvrp.reporting.tables" in Path(stages.__file__).read_text(encoding="utf-8")
+    spec = importlib.util.spec_from_file_location("dodo", Path(__file__).parents[1] / "dodo.py")
+    dodo = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(dodo)
+    task = dodo.task_report()
+    assert task["actions"] == ["python -m esvrp.stages 8"]
+    assert "reports/tables/headline.csv" in task["targets"]
+    assert {"reports/tables/h1.csv", "reports/tables/summary.csv"} <= set(task["file_dep"])
+
+
+def test_sample_expiries_stop_at_the_sample_end():
+    """Expiries listed after data.end are not expected to trade, so they are not logged as skipped (#56)."""
+    from esvrp.analysis.pipeline import sample_expiries
+
+    vrp = pd.DataFrame({"expiry": pd.to_datetime(["2026-08-31 20:00", "2026-09-30 20:00", "2026-10-30 20:00",
+                                                  "2026-09-30 20:00"], utc=True)})
+    out = sample_expiries(vrp, pd.Timestamp("2026-09-30").date())
+    assert [e.strftime("%Y-%m-%d") for e in out] == ["2026-08-31", "2026-09-30"]
