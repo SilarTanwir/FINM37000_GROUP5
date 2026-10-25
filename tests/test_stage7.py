@@ -65,3 +65,16 @@ def test_stage_runner_and_task_graph_include_stage7():
     deps = {d for task in tasks for d in task.get("file_dep", [])}
     produced_or_source = targets | {d for d in deps if not d.startswith(("data/", "reports/"))}
     assert deps <= produced_or_source  # every data file a task needs is some task's target
+
+
+def test_stage_runner_and_task_graph_include_stage8():
+    import esvrp.stages as stages
+
+    assert "esvrp.reporting.tables" in Path(stages.__file__).read_text(encoding="utf-8")
+    spec = importlib.util.spec_from_file_location("dodo", Path(__file__).parents[1] / "dodo.py")
+    dodo = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(dodo)
+    task = dodo.task_report()
+    assert task["actions"] == ["python -m esvrp.stages 8"]
+    assert "reports/tables/headline.csv" in task["targets"]
+    assert {"reports/tables/h1.csv", "reports/tables/summary.csv"} <= set(task["file_dep"])
