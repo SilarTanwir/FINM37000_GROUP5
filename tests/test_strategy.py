@@ -8,6 +8,7 @@ from esvrp.analysis.strategy import (
     margin_sensitivity,
     monthly_straddles,
     monthly_trades,
+    monthly_trades_log,
     risk_metrics,
     run_strategy,
     run_structures,
@@ -276,3 +277,90 @@ def test_run_structures_shows_how_much_of_the_result_is_costs():
     assert strangle["cost_per_vega"] == pytest.approx(60.0 / (240.0 * 50 * 0.01))
     assert strangle["cost_per_vega"] > straddle["cost_per_vega"]  # the same fixed costs on less vega
     assert straddle["cost_per_vega"] == pytest.approx(straddle["gross_mean"] - straddle["net_mean"])
+
+
+# --- entry fallback: a month whose first snapshot has no straddle (#56 b) ---------------------------------
+
+def _month(days_with_legs: dict, expiry=SEP, F=5000.0):
+    """Legs by snapshot date. Each value is a list of (strike, cp) with gain 10 for each leg."""
+    rows = []
+    for date, legs in days_with_legs.items():
+        for strike, cp in legs:
+            rows.append(leg2(date, expiry, strike, cp, 10.0, F=F, vega=300.0 if strike == F else 120.0))
+    return pd.DataFrame(rows)
+
+
+BOTH = [(5000.0, "c"), (5000.0, "p")]
+ONE_SIDED = [(5000.0, "c"), (5050.0, "p")]  # no strike with both a call and a put
+
+
+def test_first_snapshot_is_used_when_it_has_a_straddle():
+    t = monthly_trades(_month({"2026-09-01": BOTH, "2026-09-02": BOTH}))
+    assert len(t) == 1 and t.iloc[0]["date"] == pd.Timestamp("2026-09-01").date()
+    assert t.iloc[0]["entry_delay_days"] == 0
+
+
+def test_next_snapshot_is_used_when_the_first_has_no_straddle():
+    g = _month({"2026-09-01": ONE_SIDED, "2026-09-02": ONE_SIDED, "2026-09-03": BOTH})
+    t = monthly_trades(g)
+    assert len(t) == 1 and t.iloc[0]["date"] == pd.Timestamp("2026-09-03").date()
+    assert t.iloc[0]["entry_delay_days"] == 2  # business days after the first snapshot
+    assert monthly_trades(g, max_lookahead_days=1).empty  # the straddle is two snapshots away
+
+
+def test_lookahead_is_in_business_days_after_the_first_snapshot():
+    # First snapshot Fri 2026-09-04; the straddle appears Fri 2026-09-11 (5 business days later) or Mon 09-14.
+    first = {"2026-09-04": ONE_SIDED}
+    five = monthly_trades(_month({**first, "2026-09-11": BOTH}))
+    assert len(five) == 1 and five.iloc[0]["entry_delay_days"] == 5
+    six = monthly_trades(_month({**first, "2026-09-14": BOTH}))
+    assert six.empty  # 6 business days after the first snapshot is beyond the default limit
+    assert len(monthly_trades(_month({**first, "2026-09-14": BOTH}), max_lookahead_days=6)) == 1
+
+
+def test_months_without_any_straddle_are_logged_with_a_reason():
+    g = pd.concat([_month({"2026-09-01": ONE_SIDED, "2026-09-02": ONE_SIDED}, SEP),
+                   _month({"2026-10-01": BOTH}, OCT, F=5140.0)], ignore_index=True)
+    trades, skipped = monthly_trades_log(g)
+    assert list(trades["expiry"]) == [OCT]
+    assert len(skipped) == 1 and skipped.iloc[0]["expiry"] == SEP
+    assert skipped.iloc[0]["reason"] == "no_strike_with_both_legs" and skipped.iloc[0]["snapshots_tried"] == 2
+    assert skipped.iloc[0]["first_snapshot"] == pd.Timestamp("2026-09-01").date()
+
+
+def test_expected_expiries_without_snapshots_are_logged_too():
+    g = _month({"2026-09-01": BOTH})
+    nov = pd.Timestamp("2026-11-30 20:00", tz="UTC")
+    trades, skipped = monthly_trades_log(g, expected_expiries=[SEP, OCT, nov])
+    assert len(trades) == 1
+    assert set(skipped["expiry"]) == {OCT, nov} and (skipped["reason"] == "no_entries_in_month").all()
+    # every expected month has either a trade or a logged reason
+    assert set(trades["expiry"]) | set(skipped["expiry"]) == {SEP, OCT, nov}
+
+
+def test_the_strangle_falls_back_too_and_logs_its_own_reason():
+    wings = [(4750.0, "p"), (5250.0, "c")]
+    no_wings = [(5000.0, "c"), (5000.0, "p")]
+    t = monthly_trades(_month({"2026-09-01": no_wings, "2026-09-02": wings}), "strangle")
+    assert len(t) == 1 and t.iloc[0]["entry_delay_days"] == 1
+    _, skipped = monthly_trades_log(_month({"2026-09-01": no_wings}), "strangle")
+    assert skipped.iloc[0]["reason"] == "no_otm_legs_within_tolerance"
+
+
+def test_run_strategy_carries_the_log_and_the_delay_into_the_tables():
+    g = pd.concat([_month({"2026-09-01": ONE_SIDED, "2026-09-02": BOTH}, SEP),
+                   _month({"2026-10-01": ONE_SIDED}, OCT, F=5140.0)], ignore_index=True)
+    res = run_strategy(g, expected_expiries=[SEP, OCT])
+    assert len(res.trades) == 1 and res.trades.iloc[0]["entry_delay_days"] == 1
+    assert list(res.skipped["expiry"]) == [OCT]
+    s = run_structures(g)
+    assert s.loc["straddle (ATM)", "n"] == 1 and s.loc["straddle (ATM)", "n_delayed"] == 1
+    assert "entry_delay_days" in res.trades.columns
+
+
+def test_a_later_entry_still_uses_that_days_legs():
+    """The trade is priced on the snapshot it is entered on, not on the first one."""
+    g = pd.concat([_month({"2026-09-01": ONE_SIDED}, SEP), _month({"2026-09-02": BOTH}, SEP, F=5010.0)],
+                  ignore_index=True)
+    t = monthly_trades(g).iloc[0]
+    assert t["date"] == pd.Timestamp("2026-09-02").date() and t["F"] == 5010.0
