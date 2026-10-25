@@ -98,7 +98,40 @@ Possible outcomes and what each means:
   far from the strikes). `truncation_flag` and `n_strikes` from the strip are kept to rule out a data
   problem first.
 
-Results on the real sample: to be written once stages 5–7 have run.
+### Results on the real sample (run of 25 Oct 2026, issue #17)
+
+From `reports/tables/h3.csv`, `h3_sensitivity.csv` and `h3_disagreements.csv`:
+
+| | Every chain (overlapping) | Monthly (non-overlapping) |
+|---|---|---|
+| Chains | 1,049 on 706 dates | 36 |
+| Mean VRP (RV − SW) | −0.0105 (HAC t −3.4) | −0.0057 (HAC t −1.3) |
+| Mean HG | −0.0021 (HAC t −1.0) | +0.0007 (HAC t 0.2) |
+| Sign agreement | 81% | 89% |
+| Pearson (95% interval) | 0.85 (0.48 to 0.94, date blocks) | 0.95 (Fisher 0.91 to 0.98; pairs bootstrap 0.23 to 0.99) |
+| Spearman | 0.62 | 0.56 |
+
+**Reading.** H3 holds in its weak form: the two measures agree in sign most of the time and co-move, with
+both correlation intervals above zero. They do not agree in size. HG is close to zero while the VRP is
+clearly negative, which is the outcome "same sign, correlated; the size gap is the skew share" above, with
+the gap larger than expected:
+
+- On the monthly series `HG − VRP = 0.0063`. The skew term `SW − IV2_gw` averages **0.0079**, more than the
+  whole gap, and the realized term `RV_gw − RV` offsets −0.0016. Nearly all of the strip's premium is paid
+  for strikes away from the money, which a gamma-weighted, near-the-money hedge does not earn.
+- **The correlation rests on one month.** April 2025 (entry 1 April) has VRP 0.199 and HG 0.147, far from
+  every other point. Without it the monthly Pearson is 0.45 and Spearman 0.53. The pairs bootstrap
+  interval (0.23 to 0.99) reflects this; Fisher's z (0.91 to 0.98) does not, because it assumes roughly
+  normal pairs. The co-movement is real but moderate.
+- **Robust to the hedge and the block length** (`h3_sensitivity.csv`): monthly Pearson 0.94 (`iv_daily`)
+  and 0.98 (`rv`); sign agreement 83–89%. 42-day blocks only widen the every-chain interval slightly
+  (0.45 to 0.93). The `rv` hedge gives the most negative HG
+  (−0.004 on every chain).
+- **Disagreement months** (`h3_disagreements.csv`): 2023-11, 2024-12, 2025-10 and 2026-03. In the first
+  three the VRP is negative and HG positive, each with a positive skew gap (0.005 to 0.010): the premium
+  sat in the strikes the strip sees. In March 2026 the VRP is positive (realized above implied) while HG
+  is negative, with gamma-weighted realized variance below the equally weighted one (`rv_gap` −0.022): the
+  move happened away from the hedged strikes. No strip in these months has a truncation flag.
 
 ## Strategy backtest (roadmap 16)
 
