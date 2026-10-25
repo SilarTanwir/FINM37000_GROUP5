@@ -24,10 +24,16 @@ def test_stage7_writes_tables_and_figures(tmp_path):
     out = pipeline.run(config.load_config(), data_dir=tmp_path, report_dir=tmp_path / "reports")
 
     for f in ("tables/h3.csv", "tables/h3_sensitivity.csv", "tables/h3_disagreements.csv",
-              "tables/strategy.csv", "tables/strategy_trades.csv", "figures/h3.png", "figures/strategy.png"):
+              "tables/strategy.csv", "tables/strategy_trades.csv", "tables/strategy_structures.csv",
+              "tables/strategy_worst_months.csv", "tables/strategy_margin.csv", "figures/h3.png",
+              "figures/strategy.png"):
         assert (tmp_path / "reports" / f).stat().st_size > 0, f
     assert (tmp_path / "h3.parquet").exists()
     assert len(out["strategy_trades"]) == 1  # September is the only expiry inside the sample
+    assert list(out["strategy_margin"].index) == ["6%", "8%", "10%"]
+    structures = out["strategy_structures"]
+    assert structures.index[0] == "straddle (ATM)" and len(structures) == 4
+    assert len(out["strategy_worst_months"]) == 1 and out["strategy_worst_months"].iloc[0]["rank"] == 1
     assert out["h3"].loc["all chains (overlapping)", "n"] == len(out["h3_chains"]) > 0
     assert pd.read_csv(tmp_path / "reports/tables/strategy.csv", index_col=0).loc["net", "n"] == 1
 

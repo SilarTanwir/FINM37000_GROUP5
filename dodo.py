@@ -43,8 +43,10 @@ def task_chain():
     return _stage(4, "chain",
                   [f"{D}/quotes.parquet", f"{D}/underlying_daily.parquet",
                    "src/esvrp/pricing/black76.py", "src/esvrp/pricing/forward.py",
-                   "src/esvrp/pricing/chain.py", "src/esvrp/data/rates.py"],
-                  [f"{D}/chain.parquet", f"{R}/figures/forward_gap.png"], "Stage 4")
+                   "src/esvrp/pricing/chain.py", "src/esvrp/data/rates.py", "src/esvrp/data/quality.py"],
+                  [f"{D}/chain.parquet", f"{D}/chain_quality.parquet", f"{R}/figures/forward_gap.png",
+                   f"{R}/figures/chain_quality.png", f"{R}/tables/chain_quality_summary.csv",
+                   f"{R}/tables/quote_age_by_day.csv"], "Stage 4")
 
 
 def task_vrp():
@@ -75,8 +77,9 @@ def task_analysis():
                    "src/esvrp/analysis/pipeline.py", "src/esvrp/reporting/figures.py"],
                   # summary.csv is the bucket table of roadmap 14, not written yet.
                   [f"{R}/tables/summary.csv", f"{R}/tables/h3.csv", f"{R}/tables/h3_sensitivity.csv",
-                   f"{R}/tables/h3_disagreements.csv", f"{R}/tables/strategy.csv", f"{D}/h3.parquet"],
-                  "Stage 7")
+                   f"{R}/tables/h3_disagreements.csv", f"{R}/tables/strategy.csv",
+                   f"{R}/tables/strategy_structures.csv", f"{R}/tables/strategy_worst_months.csv",
+                   f"{R}/tables/strategy_margin.csv", f"{D}/h3.parquet"], "Stage 7")
 
 
 def task_report():

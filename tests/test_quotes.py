@@ -53,7 +53,7 @@ def test_futures_mid_at_snapshot():
     f["symbol"] = "ESZ6"
     out = futures_mid_at_snapshot(f.drop(columns="instrument_id"), "15:00")
     assert out.to_dict("records") == [{"date": pd.Timestamp("2026-09-01").date(),
-                                       "underlying": "ESZ6", "F": 5000.25}]
+                                       "underlying": "ESZ6", "F": 5000.25, "F_age_s": 0.0}]
 
 
 def test_cleaning_rules_drop_bad_quotes():
@@ -105,13 +105,23 @@ def test_thin_or_narrow_chains_dropped():
     assert log["chain_min_range"] == len(narrow)
 
 
-@pytest.mark.parametrize("flag,rule", [("drop_zero_bid", "zero_bid"), ("drop_crossed", "crossed")])
+@pytest.mark.parametrize("flag,rule", [("drop_zero_bid", "zero_bid"), ("drop_crossed", "crossed"),
+                                       ("drop_locked", "locked")])
 def test_rules_can_be_switched_off(flag, rule):
     from esvrp.data.quotes import _DefaultCleaning
 
-    q = pd.DataFrame({"strike": [5000, 5100], "bid": [0.0, 12.0], "ask": [1.0, 11.0]})
+    q = pd.DataFrame({"strike": [5000, 5100, 5200], "bid": [0.0, 12.0, 7.0], "ask": [1.0, 11.0, 7.0]})
     _, log = clean_quotes(q, _DefaultCleaning(**{flag: False}))
     assert log[rule] == 0
+
+
+def test_locked_has_its_own_switch():
+    """Locked quotes (bid == ask) are kept when drop_locked is off; crossed ones still go (#30)."""
+    from esvrp.data.quotes import _DefaultCleaning
+
+    q = pd.DataFrame({"strike": [5000, 5100], "bid": [12.0, 7.0], "ask": [11.0, 7.0]})  # crossed, locked
+    cleaned, log = clean_quotes(q, _DefaultCleaning(drop_locked=False))
+    assert log["crossed"] == 1 and log["locked"] == 0 and list(cleaned["strike"]) == [5100]
 
 
 def test_missing_futures_price_counted_separately():

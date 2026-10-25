@@ -9,6 +9,9 @@ Implements PLANNING.md §6 stage 7 (§4.5-4.7). Reads `vrp.parquet` (stage 5) an
 - `tables/h3_disagreements.csv`: monthly chains where VRP and HG have opposite signs, with diagnostics
 - `tables/strategy.csv`: risk metrics of the monthly short straddle, gross and net (roadmap 16)
 - `tables/strategy_trades.csv`: one row per monthly trade
+- `tables/strategy_structures.csv`: the straddle next to strangles at several distances (robustness)
+- `tables/strategy_margin.csv`: return on margin at 6%, 8% and 10% of the two legs' notional (sensitivity)
+- `tables/strategy_worst_months.csv`: the worst trades with the market move and implied vol behind each
 - `figures/h3.png`, `figures/strategy.png`
 
 The moneyness x maturity x regime table (roadmap 14, `tables/summary.csv`) is not written yet.
@@ -23,7 +26,7 @@ from typing import Any
 import pandas as pd
 
 from esvrp.analysis.reconcile import chain_hedged_variance, disagreement_cases, h3_sensitivity, reconcile
-from esvrp.analysis.strategy import run_strategy
+from esvrp.analysis.strategy import margin_sensitivity, run_strategy, run_structures
 from esvrp.data.client import DATA_DIR, REPO_ROOT
 from esvrp.reporting.figures import h3_figure, strategy_figure
 
@@ -41,6 +44,8 @@ def run(cfg: Any, data_dir: Path = DATA_DIR, report_dir: Path = REPORT_DIR) -> d
 
     joined, h3 = reconcile(vrp, chain_hedged_variance(gains, "iv_fixed"))
     strategy = run_strategy(gains, cfg.hedging.hedge_delta, MARGIN_FRACTION)
+    structures = run_structures(gains, cfg.hedging.hedge_delta, MARGIN_FRACTION)
+    margin = margin_sensitivity(strategy.trades)
 
     tables_dir, figures_dir = report_dir / "tables", report_dir / "figures"
     tables_dir.mkdir(parents=True, exist_ok=True)
@@ -52,6 +57,9 @@ def run(cfg: Any, data_dir: Path = DATA_DIR, report_dir: Path = REPORT_DIR) -> d
     disagreements.to_csv(tables_dir / "h3_disagreements.csv", index=False)
     strategy.metrics.to_csv(tables_dir / "strategy.csv")
     strategy.trades.to_csv(tables_dir / "strategy_trades.csv", index=False)
+    structures.to_csv(tables_dir / "strategy_structures.csv")
+    margin.to_csv(tables_dir / "strategy_margin.csv")
+    strategy.worst.to_csv(tables_dir / "strategy_worst_months.csv", index=False)
     h3_figure(joined, h3, figures_dir / "h3.png")
     strategy_figure(strategy.trades, strategy.metrics, figures_dir / "strategy.png")
 
@@ -62,4 +70,6 @@ def run(cfg: Any, data_dir: Path = DATA_DIR, report_dir: Path = REPORT_DIR) -> d
              d.get("ci_low", float("nan")), d.get("ci_high", float("nan")), int(net.get("n", 0)),
              net.get("mean", float("nan")), net.get("sharpe", float("nan")), report_dir)
     return {"h3_chains": joined, "h3": h3, "h3_sensitivity": sensitivity, "h3_disagreements": disagreements,
-            "strategy": strategy.metrics, "strategy_trades": strategy.trades}
+            "strategy": strategy.metrics, "strategy_trades": strategy.trades,
+            "strategy_structures": structures, "strategy_worst_months": strategy.worst,
+            "strategy_margin": margin}

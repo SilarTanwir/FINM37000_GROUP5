@@ -38,6 +38,7 @@ class _DefaultCleaning:
     min_range_pct: float = 0.10
     drop_zero_bid: bool = True
     drop_crossed: bool = True
+    drop_locked: bool = True
     backfill_minutes: int = 15
     rate: float = 0.04
 
@@ -79,9 +80,13 @@ def load_snapshots(
 
 def futures_mid_at_snapshot(futures_bbo: pd.DataFrame, snapshot_time_ct: str,
                             backfill_minutes: int = 15) -> pd.DataFrame:
-    """Mid of each futures contract at the snapshot: columns date, underlying, F."""
+    """Mid of each futures contract at the snapshot: columns date, underlying, F, F_age_s.
+
+    `F_age_s` is the snapshot minus the time of the futures record used (0 if it is in the snapshot minute).
+    """
+    cols = ["date", "underlying", "F", "F_age_s"]
     if futures_bbo.empty:
-        return pd.DataFrame(columns=["date", "underlying", "F"])
+        return pd.DataFrame(columns=cols)
     f = futures_bbo.assign(quote_ts=_quote_time(futures_bbo).to_numpy())
     f["date"] = f["quote_ts"].dt.tz_convert(TZ).dt.date
     f["snapshot_ts"] = f["date"].map({d: snapshot_ts(d, snapshot_time_ct) for d in f["date"].unique()})
@@ -89,10 +94,12 @@ def futures_mid_at_snapshot(futures_bbo: pd.DataFrame, snapshot_time_ct: str,
     f = f[(f["quote_ts"] <= f["snapshot_ts"]) & (f["quote_ts"] > f["snapshot_ts"] - window)]
     f = f.dropna(subset=["bid_px_00", "ask_px_00"])
     if f.empty:
-        return pd.DataFrame(columns=["date", "underlying", "F"])
+        return pd.DataFrame(columns=cols)
     last = f.sort_values("quote_ts").groupby(["date", "symbol"]).tail(1)
     return pd.DataFrame({"date": last["date"], "underlying": last["symbol"],
-                         "F": (last["bid_px_00"] + last["ask_px_00"]) / 2}).reset_index(drop=True)
+                         "F": (last["bid_px_00"] + last["ask_px_00"]) / 2,
+                         "F_age_s": (last["snapshot_ts"] - last["quote_ts"]).dt.total_seconds()}
+                        ).reset_index(drop=True)
 
 
 def clean_quotes(quotes: pd.DataFrame, cfg: object) -> tuple[pd.DataFrame, dict[str, int]]:
@@ -123,7 +130,8 @@ def clean_quotes(quotes: pd.DataFrame, cfg: object) -> tuple[pd.DataFrame, dict[
     two_sided = ~q["one_sided"]
     drop("crossed", two_sided & (q["bid"] > q["ask"]) if c.drop_crossed else two_sided & False)
     two_sided = ~q["one_sided"]
-    drop("locked", two_sided & (q["bid"] == q["ask"]) if c.drop_crossed else two_sided & False)
+    drop_locked = getattr(c, "drop_locked", c.drop_crossed)  # objects without the flag keep the old rule
+    drop("locked", two_sided & (q["bid"] == q["ask"]) if drop_locked else two_sided & False)
 
     has_f = "F" in q
     if has_f:
@@ -198,7 +206,10 @@ def pull_snapshots(cfg: Any, universe: pd.DataFrame, client: Any = None, workers
     frames = [f for f in frames if not f.empty]
     if not frames:
         raise ValueError("no option quotes found in the sample")
-    return pd.concat(frames, ignore_index=True)
+    # Drop all-empty columns before concatenating (pandas FutureWarning), then restore every column.
+    columns = list(dict.fromkeys(c for f in frames for c in f.columns))
+    frames = [f.dropna(axis=1, how="all") for f in frames]
+    return pd.concat(frames, ignore_index=True).reindex(columns=columns)
 
 
 def run(cfg: Any, client: Any = None) -> pd.DataFrame:
