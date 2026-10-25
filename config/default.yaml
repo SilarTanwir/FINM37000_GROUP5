@@ -18,6 +18,16 @@ cleaning:
   drop_crossed: true
   drop_locked: true
   backfill_minutes: 15         # look-back for strikes not quoted at the snapshot minute
+quality:                       # chain-level checks after cleaning (docs/stages/02_snapshots.md)
+  action: flag                 # flag | reject (reject drops the failing chains before stage 4 builds them)
+  min_calls: 8                 # two-sided calls per chain
+  min_puts: 8                  # two-sided puts per chain
+  min_strikes: 20
+  min_range_pct: 0.15          # strikes must reach F(1 - x) and F(1 + x); stage 2 already enforces 0.10
+  max_quote_age_s: 300         # a quote older than this at the snapshot is stale
+  max_stale_share: 0.25        # flag a chain if more than this share of its quotes is stale
+  max_futures_age_s: 300       # futures observation older than this at the snapshot
+  max_sync_gap_s: 300          # median |option quote time - futures observation time|
 strip:
   method: vix_discrete         # vix_discrete | iv_grid (Carr-Wu implementation)
   price_col: mid               # mid | bid | ask

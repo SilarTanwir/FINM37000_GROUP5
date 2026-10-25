@@ -80,9 +80,13 @@ def load_snapshots(
 
 def futures_mid_at_snapshot(futures_bbo: pd.DataFrame, snapshot_time_ct: str,
                             backfill_minutes: int = 15) -> pd.DataFrame:
-    """Mid of each futures contract at the snapshot: columns date, underlying, F."""
+    """Mid of each futures contract at the snapshot: columns date, underlying, F, F_age_s.
+
+    `F_age_s` is the snapshot minus the time of the futures record used (0 if it is in the snapshot minute).
+    """
+    cols = ["date", "underlying", "F", "F_age_s"]
     if futures_bbo.empty:
-        return pd.DataFrame(columns=["date", "underlying", "F"])
+        return pd.DataFrame(columns=cols)
     f = futures_bbo.assign(quote_ts=_quote_time(futures_bbo).to_numpy())
     f["date"] = f["quote_ts"].dt.tz_convert(TZ).dt.date
     f["snapshot_ts"] = f["date"].map({d: snapshot_ts(d, snapshot_time_ct) for d in f["date"].unique()})
@@ -90,10 +94,12 @@ def futures_mid_at_snapshot(futures_bbo: pd.DataFrame, snapshot_time_ct: str,
     f = f[(f["quote_ts"] <= f["snapshot_ts"]) & (f["quote_ts"] > f["snapshot_ts"] - window)]
     f = f.dropna(subset=["bid_px_00", "ask_px_00"])
     if f.empty:
-        return pd.DataFrame(columns=["date", "underlying", "F"])
+        return pd.DataFrame(columns=cols)
     last = f.sort_values("quote_ts").groupby(["date", "symbol"]).tail(1)
     return pd.DataFrame({"date": last["date"], "underlying": last["symbol"],
-                         "F": (last["bid_px_00"] + last["ask_px_00"]) / 2}).reset_index(drop=True)
+                         "F": (last["bid_px_00"] + last["ask_px_00"]) / 2,
+                         "F_age_s": (last["snapshot_ts"] - last["quote_ts"]).dt.total_seconds()}
+                        ).reset_index(drop=True)
 
 
 def clean_quotes(quotes: pd.DataFrame, cfg: object) -> tuple[pd.DataFrame, dict[str, int]]:
