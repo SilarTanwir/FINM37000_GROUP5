@@ -18,6 +18,7 @@ def test_stage7_writes_tables_and_figures(tmp_path):
     vrp = chain.groupby(["date", "expiry"]).size().rename("n").reset_index()
     vrp["vrp_diff"] = np.linspace(-0.02, 0.01, len(vrp))
     vrp["sw"], vrp["rv"] = 0.04, 0.04 + vrp["vrp_diff"]
+    vrp["tau"] = 30 / 365  # stage 5 carries each chain's tau; the H2 regimes pick the chain nearest 30 days
     gains.to_parquet(tmp_path / "hedged_gains.parquet")
     vrp.to_parquet(tmp_path / "vrp.parquet")
 
@@ -25,7 +26,8 @@ def test_stage7_writes_tables_and_figures(tmp_path):
 
     for f in ("tables/h3.csv", "tables/h3_sensitivity.csv", "tables/h3_disagreements.csv",
               "tables/strategy.csv", "tables/strategy_trades.csv", "tables/strategy_structures.csv",
-              "tables/strategy_worst_months.csv", "tables/strategy_margin.csv", "figures/h3.png",
+              "tables/strategy_worst_months.csv", "tables/strategy_margin.csv", "tables/summary.csv",
+              "figures/h3.png",
               "figures/strategy.png"):
         assert (tmp_path / "reports" / f).stat().st_size > 0, f
     assert (tmp_path / "h3.parquet").exists()

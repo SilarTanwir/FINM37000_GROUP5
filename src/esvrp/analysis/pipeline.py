@@ -14,7 +14,7 @@ Implements PLANNING.md §6 stage 7 (§4.5-4.7). Reads `vrp.parquet` (stage 5) an
 - `tables/strategy_worst_months.csv`: the worst trades with the market move and implied vol behind each
 - `figures/h3.png`, `figures/strategy.png`
 
-The moneyness x maturity x regime table (roadmap 14, `tables/summary.csv`) is not written yet.
+- `tables/summary.csv`: H2, mean hedged gain by moneyness x maturity x regime (roadmap 14, #16)
 """
 
 from __future__ import annotations
@@ -25,6 +25,7 @@ from typing import Any
 
 import pandas as pd
 
+from esvrp.analysis.buckets import bucket_table
 from esvrp.analysis.reconcile import chain_hedged_variance, disagreement_cases, h3_sensitivity, reconcile
 from esvrp.analysis.strategy import margin_sensitivity, run_strategy, run_structures
 from esvrp.data.client import DATA_DIR, REPO_ROOT
@@ -46,6 +47,7 @@ def run(cfg: Any, data_dir: Path = DATA_DIR, report_dir: Path = REPORT_DIR) -> d
     strategy = run_strategy(gains, cfg.hedging.hedge_delta, MARGIN_FRACTION)
     structures = run_structures(gains, cfg.hedging.hedge_delta, MARGIN_FRACTION)
     margin = margin_sensitivity(strategy.trades)
+    summary = bucket_table(gains, vrp, cfg.hedging.hedge_delta)
 
     tables_dir, figures_dir = report_dir / "tables", report_dir / "figures"
     tables_dir.mkdir(parents=True, exist_ok=True)
@@ -60,6 +62,7 @@ def run(cfg: Any, data_dir: Path = DATA_DIR, report_dir: Path = REPORT_DIR) -> d
     structures.to_csv(tables_dir / "strategy_structures.csv")
     margin.to_csv(tables_dir / "strategy_margin.csv")
     strategy.worst.to_csv(tables_dir / "strategy_worst_months.csv", index=False)
+    summary.to_csv(tables_dir / "summary.csv", index=False)
     h3_figure(joined, h3, figures_dir / "h3.png")
     strategy_figure(strategy.trades, strategy.metrics, figures_dir / "strategy.png")
 
@@ -72,4 +75,4 @@ def run(cfg: Any, data_dir: Path = DATA_DIR, report_dir: Path = REPORT_DIR) -> d
     return {"h3_chains": joined, "h3": h3, "h3_sensitivity": sensitivity, "h3_disagreements": disagreements,
             "strategy": strategy.metrics, "strategy_trades": strategy.trades,
             "strategy_structures": structures, "strategy_worst_months": strategy.worst,
-            "strategy_margin": margin}
+            "strategy_margin": margin, "summary": summary}
