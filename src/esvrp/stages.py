@@ -41,6 +41,10 @@ def run_stage(n: int) -> None:
         from esvrp.analysis.pipeline import run
 
         run(cfg)
+    elif n == 8:
+        from esvrp.reporting.tables import run
+
+        run(cfg)
     else:
         raise NotImplementedError(f"stage {n} is not implemented yet")
 
