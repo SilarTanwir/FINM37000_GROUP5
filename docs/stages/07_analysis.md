@@ -113,3 +113,15 @@ taken from each quote's own bid and ask.
   start.
 - `test_stage7`: the stage on simulated chains writes every table and figure; figures with no data; the
   stage runner and the `doit` graph.
+
+## H2 bucket table (`analysis/buckets.py::bucket_table`, #16)
+
+Mean long delta-hedged gain before costs, baseline hedge `iv_daily`, by moneyness (OTM puts `m < -2.5%`,
+near-ATM `|m| <= 2.5%`, OTM calls `m > 2.5%`, with `m = ln(K/F)`) × maturity (14-30 and 31-60 days) ×
+regime. The regime is the expanding-window tercile (`regime_labels`) of the swap rate on the entry date,
+from the `vrp.parquet` chain nearest 30 days; each cell also has a regime `all` row. Two measures:
+`per_vega` (the headline: dollar gain over entry vega per vol point, the units of the strategy's
+`gross_per_vega`) and `gain_over_F`. Each row has `n`, `n_dates`, the option-level mean, naive and
+entry-date-clustered t, and a HAC t on the daily mean gains with lags equal to the longest maturity in
+trading days minus one (20 and 40). Checks: `test_buckets` (simulated gains with known bucket means,
+regime counts, no look-ahead).
