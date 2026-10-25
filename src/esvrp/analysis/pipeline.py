@@ -12,6 +12,7 @@ Implements PLANNING.md §6 stage 7 (§4.5-4.7). Reads `vrp.parquet` (stage 5) an
 - `tables/strategy_structures.csv`: the straddle next to strangles at several distances (robustness)
 - `tables/strategy_margin.csv`: return on margin at 6%, 8% and 10% of the two legs' notional (sensitivity)
 - `tables/strategy_worst_months.csv`: the worst trades with the market move and implied vol behind each
+- `tables/strategy_skipped.csv`: expiries in the sample with no trade, and why (#56)
 - `figures/h3.png`, `figures/strategy.png`
 
 - `tables/summary.csv`: H2, mean hedged gain by moneyness x maturity x regime (roadmap 14, #16)
@@ -37,6 +38,13 @@ REPORT_DIR = REPO_ROOT / "reports"
 MARGIN_FRACTION = 0.10  # assumed margin per contract, a share of futures notional (§4.7: an assumption)
 
 
+def sample_expiries(vrp: pd.DataFrame, end: Any) -> list[pd.Timestamp]:
+    """Every option expiry in `vrp.parquet` on or before the sample end (expiries after it cannot trade)."""
+    expiry = pd.to_datetime(vrp["expiry"], utc=True)
+    local = expiry.dt.tz_convert("America/Chicago").dt.tz_localize(None).dt.normalize()
+    return sorted(expiry[local <= pd.Timestamp(end)].unique())
+
+
 def run(cfg: Any, data_dir: Path = DATA_DIR, report_dir: Path = REPORT_DIR) -> dict[str, pd.DataFrame]:
     """Compute and save the stage 7 tables and figures; return the tables by name."""
     data_dir, report_dir = Path(data_dir), Path(report_dir)
@@ -44,7 +52,8 @@ def run(cfg: Any, data_dir: Path = DATA_DIR, report_dir: Path = REPORT_DIR) -> d
     gains = pd.read_parquet(data_dir / "hedged_gains.parquet")
 
     joined, h3 = reconcile(vrp, chain_hedged_variance(gains, "iv_fixed"))
-    strategy = run_strategy(gains, cfg.hedging.hedge_delta, MARGIN_FRACTION)
+    strategy = run_strategy(gains, cfg.hedging.hedge_delta, MARGIN_FRACTION,
+                            expected_expiries=sample_expiries(vrp, cfg.data.end))
     structures = run_structures(gains, cfg.hedging.hedge_delta, MARGIN_FRACTION)
     margin = margin_sensitivity(strategy.trades)
     summary = bucket_table(gains, vrp, cfg.hedging.hedge_delta)
@@ -62,6 +71,7 @@ def run(cfg: Any, data_dir: Path = DATA_DIR, report_dir: Path = REPORT_DIR) -> d
     structures.to_csv(tables_dir / "strategy_structures.csv")
     margin.to_csv(tables_dir / "strategy_margin.csv")
     strategy.worst.to_csv(tables_dir / "strategy_worst_months.csv", index=False)
+    strategy.skipped.to_csv(tables_dir / "strategy_skipped.csv", index=False)
     summary.to_csv(tables_dir / "summary.csv", index=False)
     h3_figure(joined, h3, figures_dir / "h3.png")
     strategy_figure(strategy.trades, strategy.metrics, figures_dir / "strategy.png")

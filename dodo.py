@@ -78,6 +78,7 @@ def task_analysis():
                   [f"{R}/tables/summary.csv", f"{R}/tables/h3.csv", f"{R}/tables/h3_sensitivity.csv",
                    f"{R}/tables/h3_disagreements.csv", f"{R}/tables/strategy.csv",
                    f"{R}/tables/strategy_structures.csv", f"{R}/tables/strategy_worst_months.csv",
+                   f"{R}/tables/strategy_skipped.csv",
                    f"{R}/tables/strategy_margin.csv", f"{D}/h3.parquet"], "Stage 7")
 
 
