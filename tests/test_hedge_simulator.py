@@ -101,3 +101,15 @@ def test_trailing_vol_recovers_gbm_vol(rng):
     vol = trailing_vol(prices, window=21)
     assert vol.iloc[:21].isna().all()
     assert vol.mean() == pytest.approx(0.2, rel=0.05)
+
+
+def test_gamma_weighted_gain_recovers_the_variance_gap(gbm_paths):
+    """Sum of Pi over sum of 1/2 Gamma F^2 dt estimates realized minus implied variance (§4.5)."""
+    for sigma_real in (IV, 0.25):
+        res = [delta_hedged_gain(_option(), pd.Series(p), R, "iv_fixed", "mid")
+               for p in gbm_paths(sigma=sigma_real, n_paths=2000)]
+        pi = np.array([r.gain_dollars / 50 for r in res])
+        weight = np.array([r.gamma_dt for r in res])
+        assert (weight > 0).all()
+        assert pi.sum() / weight.sum() == pytest.approx(sigma_real**2 - IV**2, abs=0.002)
+        assert np.array([r.var_gap for r in res]) == pytest.approx(pi / weight)
