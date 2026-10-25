@@ -70,7 +70,7 @@ About 0.5% of two-sided quotes within 10% of the money have no implied vol.
 ## Known limitations
 
 - The parity forward comes from a single strike. A bad quote at that strike moves the whole chain;
-  the forward gap is the check. Flagging or rejecting chains on it belongs to the chain-quality issue
-  (roadmap 20).
+  the forward gap is the check. The chain-quality checks (roadmap 20, `docs/stages/02_snapshots.md`) run first
+  in stage 4; they do not use the forward gap.
 - `pricing.rate_source: fred` is not implemented; `risk_free_rate` raises for it.
 - The findings above are from one quarter, not the full sample.

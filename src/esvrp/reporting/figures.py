@@ -347,5 +347,64 @@ def rv_comparison_figure(rv: pd.DataFrame, out_path: Path) -> Path:
     return _finish(fig, "Daily versus 5-minute realized variance", summary, out_path)
 
 
+def chain_quality_figure(quality: pd.DataFrame, out_path: Path) -> Path:
+    """Chain completeness, quote freshness and synchronization through time (roadmap 20 diagnostic).
+
+    `quality` has one row per chain (see `data.quality.chain_quality`). Top: strikes per chain, daily median
+    and minimum. Middle: share of stale quotes per chain, daily median and maximum. Bottom: age of the
+    futures observation and median option-futures gap, daily maximum (empty if stage 2 did not record them).
+    Dates with at least one failing chain are marked in the top panel.
+    """
+    from matplotlib.backends.backend_agg import FigureCanvasAgg
+    from matplotlib.dates import AutoDateLocator, ConciseDateFormatter
+    from matplotlib.figure import Figure
+
+    q = quality.assign(date=lambda d: pd.to_datetime(d["date"]))
+    fig = Figure(figsize=(11, 8.2), facecolor=SURFACE)
+    FigureCanvasAgg(fig)
+    top, mid, bottom = fig.subplots(3, 1, sharex=True, gridspec_kw={"hspace": 0.32})
+    day = q.groupby("date")
+    blue, orange = MATURITY_COLORS["up to 30 days"], MATURITY_COLORS["31 to 60 days"]
+
+    _style(top, "", "Strikes per chain")
+    top.plot(day["n_strikes"].median(), color=blue, linewidth=2, label="median")
+    top.plot(day["n_strikes"].min(), color=MUTED, linewidth=1.5, label="minimum")
+    failing = q.loc[q["reasons"] != ""].groupby("date").size()
+    if len(failing):
+        top.scatter(failing.index, np.zeros(len(failing)), marker="|", s=90, color=orange, zorder=3,
+                    label="day with a failing chain", clip_on=False)
+    top.legend(frameon=False, fontsize=9, labelcolor=INK_SECONDARY, loc="upper left", ncols=3,
+               bbox_to_anchor=(0, 1.2))
+
+    _style(mid, "", "Stale quotes (share)")
+    mid.plot(day["stale_share"].median(), color=blue, linewidth=2, label="median")
+    mid.plot(day["stale_share"].max(), color=orange, linewidth=1.5, label="worst chain")
+    mid.legend(frameon=False, fontsize=9, labelcolor=INK_SECONDARY, loc="upper left", ncols=2,
+               bbox_to_anchor=(0, 1.2))
+
+    _style(bottom, "", "Seconds")
+    if q["F_age_s"].notna().any():
+        bottom.plot(day["F_age_s"].max(), color=blue, linewidth=2, label="futures observation age")
+        bottom.plot(day["sync_gap_s"].max(), color=orange, linewidth=1.5, label="option-futures gap")
+        bottom.legend(frameon=False, fontsize=9, labelcolor=INK_SECONDARY, loc="upper left", ncols=2,
+                      bbox_to_anchor=(0, 1.2))
+    else:
+        bottom.text(0.5, 0.5, "Futures observation time not recorded in this sample", ha="center",
+                    transform=bottom.transAxes, color=MUTED, fontsize=10)
+    bottom.xaxis.set_major_formatter(ConciseDateFormatter(AutoDateLocator()))
+
+    n_fail, n = int((q["reasons"] != "").sum()), len(q)
+    summary = (f"{n:,} chains over {q['date'].nunique():,} days; {n_fail:,} fail at least one rule "
+               f"({n_fail / n:.1%})." if n else "No chains.")
+    fig.suptitle("Option-chain quality: coverage, freshness and synchronization", x=0.06, y=0.985,
+                 ha="left", color=INK, fontsize=12, fontweight="bold")
+    fig.text(0.06, 0.95, summary, color=INK_SECONDARY, fontsize=9.5)
+    fig.subplots_adjust(left=0.07, right=0.98, top=0.86, bottom=0.07)
+    out_path = Path(out_path)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(out_path, dpi=160)
+    return out_path
+
+
 def make_figures(results: dict[str, pd.DataFrame], out_dir: Path) -> list[Path]:
     raise NotImplementedError
