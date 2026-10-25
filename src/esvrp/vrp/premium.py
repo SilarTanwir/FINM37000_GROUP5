@@ -13,6 +13,9 @@ target. If no pair brackets it (for example late in the month, when every remain
 30 days) the same formula extrapolates from the two nearest and the row is flagged `extrapolated`.
 Its realized variance is measured over the 30 calendar days after the snapshot on the contract the
 first valid expiry is written on (`constant_maturity_rv`).
+
+`h1_table` tests H1 (mean VRP < 0) with Newey-West standard errors (§4.6), on the constant 30-day series
+and on a non-overlapping monthly subsample of the matched-maturity chains.
 """
 
 from __future__ import annotations
@@ -22,6 +25,8 @@ from typing import Literal
 import numpy as np
 import pandas as pd
 
+from esvrp.analysis.inference import mean_with_se
+from esvrp.analysis.reconcile import monthly_subsample
 from esvrp.vrp.realized import MAX_GAP_DAYS, RV_COLUMNS, rv_table
 
 KINDS = ("diff", "log", "swap_return")
@@ -134,7 +139,7 @@ def vrp_descriptives(vrp: pd.DataFrame, columns: tuple[str, ...] = tuple(VRP_COL
     """Descriptive statistics of the premiums: one row per column.
 
     `naive_t` is mean / (std / sqrt(n)) and ignores the overlap between daily observations, so it
-    overstates significance. HAC and clustered errors belong to the inference module (roadmap 14).
+    overstates significance. The H1 test with Newey-West errors is `h1_table`.
     """
     rows = {}
     for c in columns:
@@ -147,3 +152,54 @@ def vrp_descriptives(vrp: pd.DataFrame, columns: tuple[str, ...] = tuple(VRP_COL
             "naive_t": x.mean() / (x.std() / np.sqrt(n)) if n > 1 and x.std() > 0 else np.nan,
         }
     return pd.DataFrame(rows).T
+
+
+TRADING_DAYS_30 = 21  # trading days in a 30-calendar-day window
+CARR_WU_DAILY_LAGS = 30  # Carr-Wu's lag on the overlapping daily series
+CARR_WU_MONTHLY_LAGS = 6  # ... and on non-overlapping monthly series
+
+
+def h1_table(vrp: pd.DataFrame, vrp_cm: pd.DataFrame | None = None, hac_lags: int | str = "auto",
+             columns: tuple[str, ...] = ("vrp_diff", "vrp_log")) -> pd.DataFrame:
+    """Test H1 (mean premium < 0) with naive and Newey-West t-statistics (§4.4, §4.6).
+
+    Two samples, one row per sample and premium column:
+
+    - `constant 30-day (daily, overlapping)`: `vrp_cm`, one observation per date, sorted by date.
+      Consecutive 30-day windows share most of their returns, so the HAC lag is the horizon in trading
+      days minus one (`hac_lags: auto`, 20) or the configured number; `t_hac_30` adds Carr-Wu's 30 lags.
+    - `matched, monthly (non-overlapping)`: one chain per expiry, the first date in the expiry's month
+      (`monthly_subsample`, the strategy's entry rule), HAC lag 6 as in Carr-Wu.
+
+    `sharpe_short` (log premium only) is Carr-Wu's Sharpe ratio for shorting variance: the mean of
+    -ln(RV/SW) over its Newey-West standard deviation, times sqrt(365/30) on the daily series and
+    sqrt(12) on the monthly one. A negative `mean` and `t_hac` below about -2 support H1.
+    """
+    daily_lags = TRADING_DAYS_30 - 1 if hac_lags == "auto" else int(hac_lags)
+    samples = []
+    if vrp_cm is not None and len(vrp_cm):
+        cm = vrp_cm.sort_values("date").reset_index(drop=True)
+        samples.append(("constant 30-day (daily, overlapping)", cm, daily_lags, np.sqrt(365 / 30)))
+    if len(vrp):
+        samples.append(("matched, monthly (non-overlapping)",
+                        monthly_subsample(vrp.sort_values(KEYS)), CARR_WU_MONTHLY_LAGS, np.sqrt(12)))
+    rows = []
+    for name, d, lags, annualize in samples:
+        for c in columns:
+            x = d[c].to_numpy(float) if c in d else np.array([])
+            x = x[np.isfinite(x)]
+            n = len(x)
+            row = {"sample": name, "premium": c, "n": n, "mean": float(x.mean()) if n else np.nan,
+                   "hac_lags": min(lags, max(n - 2, 0))}
+            if n > 2:
+                naive = mean_with_se(x, "naive")
+                hac = mean_with_se(x, "hac", lags=row["hac_lags"])
+                row.update(se_naive=naive.se, t_naive=naive.t, se_hac=hac.se, t_hac=hac.t)
+                if name.startswith("constant"):
+                    row["t_hac_30"] = mean_with_se(x, "hac", lags=min(CARR_WU_DAILY_LAGS, n - 2)).t
+                if c == "vrp_log" and hac.se > 0:
+                    row["sharpe_short"] = -row["mean"] / (hac.se * np.sqrt(n)) * annualize
+            rows.append(row)
+    cols = ["sample", "premium", "n", "mean", "se_naive", "t_naive", "hac_lags", "se_hac", "t_hac",
+            "t_hac_30", "sharpe_short"]
+    return pd.DataFrame(rows).reindex(columns=cols)

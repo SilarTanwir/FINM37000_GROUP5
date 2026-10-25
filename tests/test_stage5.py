@@ -53,6 +53,8 @@ def test_stage5_writes_every_table_and_figure(stage_inputs):
         assert len(pd.read_parquet(data / f"{name}.parquet")) == len(tables[name])
     assert (reports / "tables" / "vrp_descriptives.csv").exists()
     assert (reports / "tables" / "vrp_cm_descriptives.csv").exists()
+    h1 = pd.read_csv(reports / "tables" / "h1.csv")
+    assert {"sample", "premium", "t_naive", "t_hac"} <= set(h1.columns) and len(h1) == len(tables["h1"])
     for fig in ["sw_vs_rv", "vrp_distribution", "rv_comparison", "cm_sw_vs_rv", "cm_vrp_distribution"]:
         assert (reports / "figures" / f"{fig}.png").stat().st_size > 5000
 

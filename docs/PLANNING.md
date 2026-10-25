@@ -319,6 +319,7 @@ cleaning:
   min_range_pct: 0.10
   drop_zero_bid: true
   drop_crossed: true
+  drop_locked: true
   backfill_minutes: 15         # look-back for strikes not quoted at the snapshot minute
 strip:
   method: vix_discrete         # vix_discrete | iv_grid (Carr–Wu implementation)
