@@ -6,7 +6,7 @@ this file.
 
 The variance swap rate (§4) and the hedging identity (§6) are derived step by step, because the two
 measures of the premium and their reconciliation (H3) rest on them. The other sections are condensed and
-cite their sources. Sections 6–7 and 9 describe code in PR #43 (stages 6–7), not yet merged.
+cite their sources. Sections 6–7 and 9 describe stages 6–7 (merged in #33, #43 and #45).
 
 Contents: 1 Setup · 2 Black-76 and the parity forward · 3 Realized variance · 4 The variance swap rate ·
 5 The variance risk premium · 6 Delta-hedged gains · 7 Reconciling the two measures (H3) · 8 Inference ·
@@ -70,8 +70,10 @@ so quotes outside them get no implied vol.
 
 $$F = K + e^{r\tau}(C - P).$$
 
-Stage 4 applies this at the strike where $|C - P|$ is smallest, where an error in either mid moves $F$
-least (the Cboe VIX rule). This parity forward is used for pricing instead of the futures mid because the
+Stage 4 applies this at the strike where $|C - P|$ is smallest (the Cboe VIX rule). The choice is about
+quote quality, not the formula: an error $\varepsilon$ in $C - P$ moves $F$ by $e^{r\tau}\varepsilon$ at any
+strike, but the strike nearest the money has the most liquid, tightest quotes, so $\varepsilon$ is smallest
+there. This parity forward is used for pricing instead of the futures mid because the
 option and futures quotes are not synchronous: an error in $F$ pushes call and put implied vols in
 opposite directions. The futures mid `F_fut` remains the price the hedge trades (§6).
 
@@ -217,9 +219,12 @@ interpolated linearly in **total** variance $SW\cdot\tau$ between the two expiri
 
 $$SW_{30} = \frac{1}{\tau}\left[SW_1\tau_1\frac{\tau_2 - \tau}{\tau_2 - \tau_1} + SW_2\tau_2\frac{\tau - \tau_1}{\tau_2 - \tau_1}\right],\qquad \tau = 30/365 .$$
 
-Interpolating total variance, not the rate, keeps the term structure free of calendar arbitrage: total
-variance must rise with maturity. With monthly expiries only, late in a month both valid expiries can lie
-beyond 30 days; the same formula then extrapolates and the row is flagged `extrapolated`.
+Interpolating total variance, not the rate, keeps the interpolated value free of calendar arbitrage:
+total variance must rise with maturity, and a weighted average of two increasing values stays between
+them. That guarantee holds only for interpolation. With monthly expiries only, late in a month both valid
+expiries can lie beyond 30 days; the same formula then extrapolates (flagged `extrapolated`), and from far
+expiries it can give a negative total variance. On the real data this produced four negative swap rates,
+so extrapolation is capped (#55).
 
 ---
 
@@ -246,7 +251,7 @@ expiry, and any conditioning variable (a regime) must use information at $t$ onl
 
 ## 6. Delta-hedged gains
 
-*Code: `hedging/simulator.py` (core merged in #33; stage 6 driver in #43). Source: Bakshi and Kapadia
+*Code: `hedging/simulator.py` (merged in #33 and #43). Source: Bakshi and Kapadia
 (2003), §1.*
 
 ### 6.1 Definition
@@ -318,7 +323,7 @@ $\approx \text{Vega}\cdot d\sigma_i$; (8) is exact only for `iv_fixed`.
 
 ## 7. Reconciling the two measures (H3)
 
-*Code: `analysis/reconcile.py` (PR #43, stage 7).*
+*Code: `analysis/reconcile.py` (stage 7, merged in #43; sensitivity and disagreement cases in #54).*
 
 **Same units.** For each chain (one expiry on one date), sum identity (8) over the chain's options $j$ and
 divide by their total gamma weight:
@@ -386,14 +391,14 @@ variable $x_t$ (`sw_level` or trailing 21-day realized vol), its expanding-windo
 
 $$p_t = \frac{1}{t}\sum_{s\le t}\mathbf 1\{x_s \le x_t\},\qquad \text{label}_t = \lceil p_t\cdot n_{\text{bins}}\rceil - 1 ,$$
 
-left empty for the first 21 observations. Appending later data never changes an earlier label
+left empty for the first 20 observations (the first label is at the 21st, `min_periods=21`). Appending later data never changes an earlier label
 (`test_regimes_no_lookahead`). Full-sample percentiles would leak future volatility into the buckets.
 
 ---
 
 ## 9. Strategy, returns and costs
 
-*Code: `analysis/strategy.py` (PR #43), `hedging/costs.py`.*
+*Code: `analysis/strategy.py` (merged in #43 and #45), `hedging/costs.py`.*
 
 **Trade.** For each end-of-month expiry, on the first snapshot of its month, sell one delta-hedged
 straddle (call and put at the strike nearest the forward), hedge daily with the option's own futures
@@ -405,7 +410,9 @@ bid is the mid gain less the half-spread.
 $$\text{cost} = \underbrace{h\cdot\$50}_{\text{half-spread }h\text{ in points}} + \underbrace{N\cdot\$6.25}_{0.5\text{ tick per rebalance}} + \underbrace{\$1.50\,(1 + N)}_{\text{fees: option and each hedge trade}},$$
 
 with $N$ rebalances. Net P&L is gross minus cost; `cost_multiplier` scales costs for robustness. Slippage is
-one contract per rebalance whatever the change in delta (#41 proposes charging on the change in delta).
+one contract per rebalance whatever the change in delta (#41 proposes charging on the change in delta). Each
+leg of a straddle is also hedged on its own, so slippage is paid on two contracts even when the legs' deltas
+partly cancel; hedging the net delta (#57) would lower costs and leave gross P&L unchanged.
 
 **Returns per unit vega** (primary, §15.5). Divide P&L by the straddle's dollar vega per vol point,
 $(\text{Vega}_C + \text{Vega}_P)\times\$50\times 0.01$. To first order a hedged short option earns
@@ -432,10 +439,10 @@ hide rare large losses; the tail metrics are reported, not averaged away.
 | 4 | $SW$ (strip, eq. 5) and diagnostics | 5 | `vrp/strip.py` | `data/strip.parquet` |
 | 4.8 | Constant 30-day $SW$, $RV$ | 5 | `vrp/premium.py` | `data/*_cm.parquet` |
 | 5 | $VRP$, log premium, swap return | 5 | `vrp/premium.py` | `data/vrp.parquet`, `reports/tables/vrp_descriptives.csv` |
-| 6 | $\Pi$, gamma weight $W$ | 6 | `hedging/simulator.py` | `data/hedged_gains.parquet` (#43) |
-| 7 | $HG$, H3 statistics | 7 | `analysis/reconcile.py` | `data/h3.parquet`, `reports/tables/h3.csv` (#43) |
+| 6 | $\Pi$, gamma weight $W$ | 6 | `hedging/simulator.py` | `data/hedged_gains.parquet` |
+| 7 | $HG$, H3 statistics | 7 | `analysis/reconcile.py` | `data/h3.parquet`, `reports/tables/h3.csv` |
 | 8 | Naive, HAC, clustered, bootstrap SEs; regimes | 7 | `analysis/inference.py`, `buckets.py` | used by stage 7 tables |
-| 9 | Strategy P&L, costs, risk metrics | 7 | `analysis/strategy.py`, `hedging/costs.py` | `reports/tables/strategy.csv` (#43) |
+| 9 | Strategy P&L, costs, risk metrics | 7 | `analysis/strategy.py`, `hedging/costs.py` | `reports/tables/strategy.csv` |
 
 ## References
 
