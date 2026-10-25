@@ -287,3 +287,33 @@ def test_rv_table_still_joins_to_strips(raw_week):
     rv = rv_table(chains, bars, bars.iloc[0:0].assign(settle=[]))
     strips = chains.assign(sw_mid=0.04)
     assert len(vrp_table(strips, rv)) == 1
+
+
+# --- extrapolation cap (#55) -----------------------------------------------------------------------------
+
+def test_far_expiries_get_no_swap_rate_and_a_reason():
+    cm = constant_maturity(_strips([(83, 0.04), (113, 0.05)]), max_extrapolation_days=60)
+    assert len(cm) == 1 and cm["extrapolated"].iloc[0]
+    assert cm[["sw_mid", "sw_bid", "sw_ask"]].isna().all(axis=None)
+    assert cm["cm_reason"].iloc[0] == "extrapolation_too_far"
+
+
+def test_near_expiries_still_extrapolate_within_the_cap():
+    cm = constant_maturity(_strips([(35, 0.04), (66, 0.04)]), max_extrapolation_days=60)
+    assert cm["sw_mid"].iloc[0] == pytest.approx(0.04) and cm["cm_reason"].iloc[0] == "ok"
+
+
+def test_flat_term_structure_extrapolates_flat_at_the_cap():
+    cm = constant_maturity(_strips([(60, 0.04), (90, 0.04)]), max_extrapolation_days=60)
+    assert cm["sw_mid"].iloc[0] == pytest.approx(0.04)
+
+
+def test_non_positive_extrapolated_variance_is_left_empty():
+    # steeply falling total variance extrapolated back to 30 days goes negative
+    cm = constant_maturity(_strips([(35, 0.001), (66, 0.05)]), max_extrapolation_days=60)
+    assert cm["cm_reason"].iloc[0] == "non_positive_variance" and cm["sw_mid"].isna().iloc[0]
+
+
+def test_no_cap_keeps_the_old_behaviour():
+    cm = constant_maturity(_strips([(83, 0.04), (113, 0.045)]))
+    assert cm["sw_mid"].notna().iloc[0] and cm["cm_reason"].iloc[0] == "ok"

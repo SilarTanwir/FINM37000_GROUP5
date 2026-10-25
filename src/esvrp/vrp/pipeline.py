@@ -66,7 +66,8 @@ def run(cfg: Any, data_dir: Path = DATA_DIR, report_dir: Path = REPORT_DIR) -> d
     vrp = vrp_table(strips, rv, "diff", sw_col=sw_col, rv_col=rv_col)
 
     # Constant 30-day maturity, the series comparable to Carr-Wu (Eq. 10).
-    cm = constant_maturity(strips, TARGET_DAYS, cfg.strip.min_front_days)
+    cm = constant_maturity(strips, TARGET_DAYS, cfg.strip.min_front_days,
+                           max_extrapolation_days=cfg.strip.max_cm_extrapolation_days)
     rv_cm = constant_maturity_rv(cm, bars_5m, daily, cfg.realized.max_gap_days)
     vrp_cm = vrp_table(cm, rv_cm, "diff", sw_col=sw_col, rv_col=rv_col) if len(cm) else cm
 
